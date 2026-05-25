@@ -1,0 +1,7 @@
+requests
+psycopg[binary]
+sentence-transformers
+pydantic
+tqdm
+python-dotenv
+anthropic

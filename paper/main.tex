@@ -1,0 +1,698 @@
+% IS-RAG — arXiv preprint, standalone (no ACL .sty required)
+% Compiles with: pdflatex main.tex  (twice, then bibtex, twice again)
+% Requires standard TeX Live packages only.
+\documentclass[11pt,a4paper]{article}
+
+% --- Layout ---
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{multicol}           % two-column body (optional, comment out for single)
+\usepackage{titlesec}
+\usepackage{parskip}
+
+% --- Fonts & Encoding ---
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{microtype}
+
+% --- Math ---
+\usepackage{amsmath,amssymb}
+
+% --- Tables & Figures ---
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{float}
+
+% --- Lists ---
+\usepackage{enumitem}
+
+% --- Color ---
+\usepackage{xcolor}
+
+% --- Algorithms ---
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
+
+% --- Code listings ---
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8},
+  columns=fullflexible,
+  keepspaces=true,
+  literate={á}{{\'a}}1 {ã}{{\~a}}1 {â}{{\^a}}1 {à}{{\`a}}1
+           {é}{{\'e}}1 {ê}{{\^e}}1
+           {í}{{\'i}}1
+           {ó}{{\'o}}1 {ô}{{\^o}}1 {õ}{{\~o}}1
+           {ú}{{\'u}}1 {ü}{{\"u}}1
+           {ç}{{\c{c}}}1
+           {Á}{{\'A}}1 {Ã}{{\~A}}1 {É}{{\'E}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
+}
+
+% --- Hyperlinks ---
+\usepackage[colorlinks=true,linkcolor=blue!70!black,citecolor=blue!70!black,urlcolor=blue!70!black]{hyperref}
+
+% --- Bibliography ---
+\usepackage[round,sort,authoryear]{natbib}
+\bibliographystyle{plainnat}
+
+% --- Section formatting (ACL-like) ---
+\titleformat{\section}{\normalsize\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\itshape}{\thesubsection.}{0.5em}{}
+\titleformat{\paragraph}[runin]{\normalsize\bfseries}{}{0pt}{}[~~]
+\titlespacing{\section}{0pt}{6pt}{3pt}
+\titlespacing{\subsection}{0pt}{4pt}{2pt}
+
+% --- Figure placeholder ---
+\newcommand{\figplaceholder}[2]{%
+  \begin{center}
+    \fbox{\parbox[c][#1][c]{0.92\linewidth}{%
+      \centering\color{gray}\small [Figure — #2]%
+    }}
+  \end{center}%
+}
+
+% --- Abstract environment ---
+\renewenvironment{abstract}{%
+  \small\begin{center}{\bfseries Abstract}\end{center}%
+  \begin{quote}\small
+}{%
+  \end{quote}\bigskip
+}
+
+% =================================================================
+\begin{document}
+
+% --- Title block ---
+\begin{center}
+  {\Large\bfseries IS-RAG: Image-Schematic Retrieval-Augmented\\
+   Generation for Cognitive Search in Political Discourse}
+
+  \vspace{0.8em}
+
+  % TODO: fill in author names
+  {\normalsize
+    Author One$^1$ \quad Author Two$^1$ \quad Author Three$^2$ \\[4pt]
+    $^1$ Institution One \quad $^2$ Institution Two \\[4pt]
+    \texttt{\{author1,author2\}@inst1.edu} \quad
+    \texttt{author3@inst2.edu}
+  }
+
+  \vspace{0.6em}
+  \rule{\linewidth}{0.4pt}
+\end{center}
+
+% =================================================================
+\begin{abstract}
+We introduce \textbf{IS-RAG}, a technique that augments
+standard dense retrieval with
+\emph{image-schema cognitive boosting} grounded in the cognitive
+linguistics of \citet{lakoff1980} and \citet{talmy1988}.
+During indexing, each document chunk is annotated by an LLM-based
+\emph{Cognitive Parser} that identifies image schemas
+(\textsc{Force}, \textsc{Container}, \textsc{Path}) and their
+subtypes, storing them as structured metadata alongside two
+independent vector embeddings—one over raw text, one over the
+serialised cognitive structure.
+At query time, IS-RAG detects schemas in the query and applies
+a continuous proportional score boost to chunks that share the same
+cognitive structure, enabling \emph{cross-domain} retrieval driven
+by abstract spatial metaphor rather than lexical overlap.
+We evaluate IS-RAG on a corpus of 121 Brazilian parliamentary
+speeches in \textbf{Portuguese} using TREC-style pooling and
+NDCG@5.
+Over 9 valid evaluation queries (3~\textsc{Force} $+$
+2~\textsc{Container} $+$ 3~\textsc{Path} $+$ 1~cross-schema),
+IS-RAG achieves a mean NDCG@5 of 0.7073 vs.\ 0.6947 for a
+dense-retrieval baseline ($\Delta = +0.013$).
+Schema-family-weighted analysis reveals that gains concentrate in
+\textsc{Force} queries ($\Delta = +0.210$) while
+\textsc{Container} and \textsc{Path} show neutral or negative
+results ($\Delta_\text{family-weighted} = -0.017$).
+We document methodological findings including the requirement for
+\emph{assertive metaphorical query formulation} and the
+non-annotability of conventionalised schemas.
+\end{abstract}
+
+% =================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Retrieval-Augmented Generation \citep{lewis2020rag} typically grounds
+document retrieval in surface-level lexical or dense semantic
+similarity.
+This works well when query vocabulary overlaps with document
+vocabulary, but breaks down under a \emph{lexical-cognitive gap}: the
+user and the document express the same conceptual structure using
+different words, often because both rely on underlying bodily
+metaphors that map physical spatial experience onto abstract domains
+\citep{johnson1987,lakoff1980}.
+
+Consider a query about \emph{economic pressure on households} and a
+parliamentary speech about \emph{institutions blocking each other in a
+constitutional dispute}. Both invoke the image schema
+\textsc{Force}/\textsc{Compulsion}—an external agent exerting force on
+a patient—yet their vocabularies share little overlap, making standard
+dense retrieval unable to bridge the gap.
+
+\emph{Image schemas} \citep{johnson1987,feldman2006} are
+pre-linguistic, embodied patterns (\textsc{Container}, \textsc{Path},
+\textsc{Force}) that recur as structural metaphors across every domain
+of abstract reasoning.
+We hypothesise that indexing these schemas explicitly and matching them
+at query time enables a form of deep structural retrieval that
+complements dense semantic search.
+
+\paragraph{Contributions.}
+\begin{itemize}[noitemsep,topsep=2pt]
+  \item We present IS-RAG, a technique that indexes image-schema
+        metadata alongside dual vector embeddings (text and cognitive)
+        and applies proportional cognitive boosting at retrieval time
+        (\S\ref{sec:method}).
+  \item We construct a TREC-style ground truth over a real corpus of
+        Brazilian parliamentary speeches (171 chunks, 9 valid queries,
+        LLM-as-annotator) and report NDCG@5 (\S\ref{sec:eval}).
+  \item We identify methodological constraints for schema-aware
+        retrieval evaluation: assertive query formulation, schema
+        frequency vs.\ annotability, and LLM circularity risk
+        (\S\ref{sec:discussion}).
+\end{itemize}
+
+% =================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Retrieval-Augmented Generation.}
+\citet{lewis2020rag} introduced RAG to ground generation in retrieved
+passages. Dense retrieval over bi-encoder representations
+\citep{karpukhin2020dpr} has become the standard backbone. Extensions
+explore hybrid sparse-dense search, re-ranking, and structured
+knowledge augmentation, but none incorporate pre-linguistic spatial
+metaphor as a retrieval signal.
+
+\paragraph{Metaphor in NLP.}
+Automatic metaphor detection has been studied as classification or
+span extraction \citep{shutova2010,tsvetkov2014}.
+\citet{wachowiak2023,wachowiak-gromann-2022-systematic} explore LLMs for metaphor identification. These
+works focus on metaphor \emph{detection}; IS-RAG is the first, to our
+knowledge, to use detected image-schema structure as a
+\emph{retrieval scoring signal}.
+
+\paragraph{Cognitive Linguistics and IR.}
+Image schemas as cognitive universals were formalised by
+\citet{lakoff1980}, \citet{johnson1987}, and \citet{talmy1988}.
+\citet{feldman2006} discusses their neural basis. No prior IR work
+indexes documents by image schema and uses schema matching for
+retrieval boosting.
+
+\paragraph{Portuguese NLP and parliamentary corpora.}
+Pre-trained language models for Brazilian Portuguese
+\citep{souza2020bertimbau} have demonstrated that language-specific
+pretraining substantially improves downstream performance relative to
+generic multilingual models.
+Parliamentary discourse in Portuguese has been studied through the
+Corpus Ulysses \citep{albuquerque2022ulyssesner}, a collection of legislative
+documents from the Brazilian Chamber of Deputies used for text
+classification, named entity recognition, and semantic analysis.
+Our evaluation corpus is drawn from the same institutional source
+via the same open API and extends existing resources with
+image-schema annotations and graduated relevance judgements for
+retrieval evaluation.
+Framing and sentiment analysis of Brazilian political text
+\citep{vargas2021bert} provide further precedent for
+computational approaches to ideological structure in Portuguese
+parliamentary language.
+
+% =================================================================
+\section{Method}
+\label{sec:method}
+
+Figure~\ref{fig:pipeline} illustrates the IS-RAG pipeline. Formal
+pseudo-code is given in Appendix~\ref{app:algorithms}.
+
+\begin{figure}[H]
+  \figplaceholder{4.5cm}{%
+    IS-RAG architecture: \textbf{left} = indexing pipeline
+    (corpus $\to$ chunking $\to$ dual embeddings + cognitive
+    parser $\to$ PostgreSQL/pgvector);
+    \textbf{right} = query-time retrieval
+    (query $\to$ cognitive analysis $\to$ hybrid scoring +
+    boosting $\to$ ranked results).%
+  }
+  \caption{IS-RAG overview: indexing and retrieval steps.}
+  \label{fig:pipeline}
+\end{figure}
+
+\subsection{Corpus and Chunking}
+
+The corpus comprises 121 Brazilian parliamentary speeches in
+\textbf{Portuguese}, collected from the open API of the Brazilian
+Chamber of Deputies (\url{dados.camara.leg.br/api/v2}), spanning
+January–December~2025.
+Speeches are stratified by ideological spectrum (left, centre, right)
+across 13 parties.
+Each speech is segmented into chunks of approximately 150~words using
+sentence-boundary splitting, yielding 171~chunks (mean 2.7 per
+speech).
+
+\subsection{Dual Embeddings}
+
+Each chunk produces two independent 768-dimensional vectors:
+
+\begin{enumerate}[noitemsep,topsep=2pt]
+  \item \textbf{Text embedding:} dense representation of the raw chunk
+        text via \textit{paraphrase-multilingual-mpnet-base-v2}
+        \citep{reimers2019sbert}, running locally on CPU.
+  \item \textbf{Cognitive embedding:} dense representation of the
+        serialised cognitive metadata in the form
+        \texttt{"SCHEMA: anchor $\to$ domain $|$ \ldots"}, capturing
+        image-schematic structure independently of literal vocabulary.
+\end{enumerate}
+
+Both vectors are stored in PostgreSQL~16 with the \texttt{pgvector}
+extension and indexed via HNSW for approximate nearest-neighbour
+search.
+
+We deliberately chose \texttt{paraphrase-multilingual-mpnet-base-v2}
+over more recent commercial embedding APIs for two reasons.
+First, \emph{reproducibility}: all embeddings are generated locally
+without API access, rate limits, or usage costs, enabling full
+replication of the experiment.
+Second, \emph{adequacy}: the model provides validated coverage of
+Portuguese within a 768-dimensional space sufficient for the
+proof-of-concept scale of this work (171~chunks), and its
+multilingual training includes Brazilian Portuguese
+\citep{souza2020bertimbau}.
+We do not claim that upgrading to larger or more recent embedding
+models would not improve results; this is an explicit agenda item
+(\S\ref{sec:conclusion}) but is orthogonal to the variable under
+investigation—the cognitive boosting signal itself.
+
+\subsection{Cognitive Parser}
+
+The Cognitive Parser sends each chunk to
+\texttt{claude-haiku-4-5} \citep{anthropic2024} using a shared prompt
+(Appendix~\ref{app:prompt}) and extracts structured JSON validated by
+a Pydantic schema. The taxonomy follows \citet{lakoff1980} and
+\citet{talmy1988}:
+
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Schema} & \textbf{Subtypes} \\
+\midrule
+\textsc{Container} & Inside, Outside, Boundary, Intrusion \\
+\textsc{Path}      & Source, Trajectory, Goal, Diversion \\
+\textsc{Force}     & Blockage, Compulsion, Resistance, Counter\_Force \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A \emph{literality rule} instructs the model to return empty lists for
+non-metaphorical text, preventing hallucinated schemas.
+Chunks are processed concurrently (5 workers) to reduce ingestion
+time.
+The corpus yields 92~\textsc{Path}, 88~\textsc{Container}, and
+83~\textsc{Force} schema occurrences across the 171~chunks.
+
+\subsection{Hybrid Search and Cognitive Boosting}
+\label{sec:boosting}
+
+IS-RAG supports three retrieval modes: \emph{text} (text embedding
+only), \emph{cognitive} (cognitive embedding only), and \emph{hybrid}
+(mean of both similarities). After computing the base vector
+similarity~$s$, a \emph{proportional cognitive boost} is applied:
+
+\begin{equation}
+  \label{eq:boosting}
+  \hat{s} = s \cdot \bigl(1 + 0.4\,\sigma + 0.3\,\delta\bigr)
+\end{equation}
+
+\noindent where $\sigma$ is the fraction of a chunk's cognitive
+details whose \texttt{schema\_name} matches a schema detected in the
+query, and $\delta$ is the analogous fraction for
+\texttt{target\_domain}.
+Weights ($\alpha{=}0.4$, $\beta{=}0.3$) were set by design; schema
+structure is the primary signal, domain the secondary reinforcement.
+The baseline disables the Cognitive Parser and applies pure
+text-embedding retrieval without boosting.
+
+% =================================================================
+\section{Evaluation Setup}
+\label{sec:eval}
+
+\paragraph{Ground Truth Construction.}
+We construct a TREC-style pooled ground truth
+\citep{voorhees2005}.
+For each query, IS-RAG (hybrid) and the baseline independently
+retrieve the top-10 chunks; the union ($\approx$14--18 unique chunks
+per query) is annotated for relevance~(0--3) by an LLM
+(\texttt{claude-haiku-4-5}).
+Scores~$\geq 2$ require the annotator to cite an anchor word and
+schema subtype as traceable evidence.
+Queries with IDCG$=0$ (no chunk with score~$\geq 2$) are excluded
+\citep{buckley2004}; this criterion triggered the exclusion of one
+query (see \S\ref{sec:discussion}).
+
+\paragraph{Query Design.}
+Nine valid queries are designed with three properties:
+(1)~taxonomic coverage (3~\textsc{Force} $+$ 2~\textsc{Container} $+$
+3~\textsc{Path} $+$ 1~cross-schema);
+(2)~deliberate lexical gap (queries use assertive metaphorical
+language, avoiding the literal vocabulary expected in documents);
+(3)~cross-domain scenarios (queries target schemas that appear in
+domains other than the query's own domain).
+
+\paragraph{Metric.}
+We report NDCG@5 \citep{jarvelin2002}.
+MRR was rejected: with multiple relevant documents at different
+relevance grades, MRR saturates at~1.0 regardless of ranking quality
+\citep{buckley2004}.
+
+% =================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Per-Query Results}
+
+Table~\ref{tab:perquery} reports NDCG@5 for IS-RAG and the baseline
+across all 9~valid queries (hybrid mode).
+Figure~\ref{fig:results} visualises the per-query $\Delta$.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{clccc}
+\toprule
+\textbf{Q} & \textbf{Schema / Domain} & \textbf{IS-RAG} & \textbf{Base} & $\boldsymbol{\Delta}$ \\
+\midrule
+Q2 & \textsc{Force}/Compulsion / Economics    & 0.8375 & 0.5308 & \textbf{+0.307} \\
+Q3 & \textsc{Force}/Counter\_F / Justice      & 0.9093 & 0.6590 & \textbf{+0.250} \\
+Q4 & \textsc{Force}/Resistance / Politics     & 0.6548 & 0.5818 & +0.073 \\
+\midrule
+Q5 & \textsc{Cont.}/Intrusion / Justice       & 0.6403 & 0.9105 & $-$0.270 \\
+Q6 & \textsc{Cont.}/Outside / Human Rights    & 0.7833 & 0.7226 & +0.061 \\
+\midrule
+Q7 & \textsc{Path}/Trajectory / Economics     & 0.6488 & 0.6488 & $\pm$0.000 \\
+Q8 & \textsc{Path}/Source / Politics          & 0.5745 & 0.6972 & $-$0.123 \\
+Q9 & \textsc{Path}/Diversion / Politics       & 0.7777 & 0.8527 & $-$0.075 \\
+\midrule
+Q10 & \textsc{Force+Path} / Intl.\ Rel.       & 0.5397 & 0.6488 & $-$0.109 \\
+\midrule
+\multicolumn{2}{l}{\textbf{Mean (9 queries)}} & \textbf{0.7073} & \textbf{0.6947} & \textbf{+0.013} \\
+\bottomrule
+\end{tabular}
+\caption{NDCG@5 (IS-RAG vs.\ baseline, hybrid mode). Queries grouped by schema family.}
+\label{tab:perquery}
+\end{table}
+
+\begin{figure}[H]
+  \figplaceholder{4cm}{%
+    Bar chart: $\Delta$ NDCG@5 per query (Q2--Q10),
+    coloured by schema family —
+    \textsc{Force} (blue), \textsc{Container} (orange),
+    \textsc{Path} (green), Cross (purple).
+    Horizontal reference line at $\Delta = 0$.%
+  }
+  \caption{Per-query $\Delta$ NDCG@5 (IS-RAG $-$ baseline).}
+  \label{fig:results}
+\end{figure}
+
+\subsection{Per-Schema Analysis}
+
+Table~\ref{tab:schema} aggregates results by schema family. The
+unweighted mean ($\Delta{=}{+}0.013$) masks strong heterogeneity:
+\textsc{Force} drives all the gains, while \textsc{Container} and
+\textsc{Path} are neutral or negative.
+Equal-weighting across the four schema families yields
+$\Delta_\text{family}{=}{-}0.017$.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccp{3.8cm}}
+\toprule
+\textbf{Family} & \textbf{$n$} & \textbf{Mean $\Delta$} & \textbf{Individual $\Delta$} \\
+\midrule
+\textsc{Force}     & 3 & \textbf{+0.210} & +0.307,\ +0.250,\ +0.073 \\
+\textsc{Container} & 2 & $-$0.105        & $-$0.270,\ +0.061 \\
+\textsc{Path}      & 3 & $-$0.066        & \ 0.000,\ $-$0.123,\ $-$0.075 \\
+Cross              & 1 & $-$0.109        & $-$0.109 \\
+\midrule
+\multicolumn{2}{l}{Family-weighted mean} & $-$0.017 & \\
+\bottomrule
+\end{tabular}
+\caption{NDCG@5 $\Delta$ by schema family (hybrid mode).}
+\label{tab:schema}
+\end{table}
+
+% =================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Force benefits most from cognitive boosting.}
+All three \textsc{Force} queries show positive~$\Delta$, with
+\textsc{Compulsion} ($+$0.307) and \textsc{Counter\_Force} ($+$0.250)
+as the strongest results.
+\textsc{Force} schemas tend to use salient, non-conventionalised
+metaphorical vocabulary in parliamentary discourse
+(\emph{pressiona, bloqueia, choca}), making schema detection and
+boosting effective.
+This pattern is corpus-specific and should not be generalised without
+further validation.
+
+\paragraph{Path and Container do not benefit.}
+\textsc{Path} metaphors appear conventionalised in parliamentary
+register to the point that they do not discriminate relevant from
+non-relevant chunks.
+\textsc{Container}/\textsc{Intrusion} (Q5) was designed for
+\emph{cognitive} mode; forced execution in hybrid mode explains part
+of the degradation ($\Delta = -0.270$).
+
+\paragraph{Assertive query formulation is required.}
+The Cognitive Parser applies a literality rule: interrogative or
+analytical queries (\emph{``Which deputies argue that\ldots''}) are
+correctly classified as non-metaphorical, returning empty schema lists
+and zeroing the boost.
+Queries must be formulated as \emph{assertive metaphorical statements}
+to activate the cognitive component.
+This is a binding operational constraint for any IS-RAG deployment.
+
+\paragraph{Schema frequency $\neq$ annotability.}
+Q1 was designed as \textsc{Container}/\textsc{Inside}, the most
+frequent subtype in the corpus (80~occurrences).
+Despite high frequency, the annotator consistently rated
+\textsc{Inside} chunks at score~1 (domain present, schema
+non-salient) rather than $\geq 2$ (clear metaphorical
+instantiation).
+Spatial containment is so conventionalised in parliamentary discourse
+that it does not constitute a discriminative relevance signal.
+Q1 was excluded (IDCG${=}0$), yielding a final 3-2-3-1 query
+distribution.
+
+\paragraph{Limitations.}
+(1)~The corpus is small and homogeneous (171~chunks, single register,
+Portuguese only); results lack statistical significance tests.
+(2)~\emph{LLM circularity}: the same model annotates, parses, and
+boosts—creating risk that the annotator favours chunks the parser
+indexed with the same schemas as the query.
+A blind human audit on a 20\% sample of the annotated pool will be
+conducted in future work to compute Fleiss' Kappa inter-annotator
+agreement between independent human judges and the LLM annotator.
+(3)~Domain confounding: \textsc{Force} queries cluster in Economics
+and Justice; if the schema co-occurs with those domains in the corpus,
+gains may reflect domain affinity rather than purely cognitive
+structure.
+(4)~Boosting weights ($\alpha{=}0.4$, $\beta{=}0.3$) are fixed design
+choices, not optimised.
+
+% =================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presents IS-RAG as a pioneering pilot study opening a new
+line of research at the intersection of cognitive linguistics and
+information retrieval.
+The core contribution is not a claim of universal superiority, but a
+demonstration that image-schema metadata can be encoded, detected, and
+leveraged within a standard dense retrieval pipeline---producing
+measurable NDCG@5 gains for \textsc{Force}-schema queries in hybrid
+mode ($\Delta_\text{FORCE} = +0.210$) on a real Brazilian parliamentary
+corpus.
+
+The asymmetric results across schema families are themselves a finding:
+they reveal that schema frequency in a corpus does not predict
+annotability, and that the relationship between cognitive structure and
+retrieval relevance is non-trivial and worth systematic investigation.
+IS-RAG establishes the proof of concept and the methodological
+scaffolding---dual embeddings, cognitive boosting, TREC-style
+schema-stratified evaluation---that future work in \emph{cognitive IR}
+can build upon.
+
+Immediate next steps include a schema$\times$domain crossed evaluation
+design, investigation of conventionalised schemas in graded-relevance
+annotation, cross-register and cross-language validation, and the
+Fleiss' Kappa human audit described above.
+We invite the IR and cognitive linguistics communities to extend,
+challenge, and refine this technique across richer corpora and
+retrieval architectures.
+
+% =================================================================
+\bibliography{references}
+
+% =================================================================
+\appendix
+\setcounter{section}{0}
+\renewcommand{\thesection}{\Alph{section}}
+
+\section{Cognitive Analysis Prompt}
+\label{app:prompt}
+
+The following prompt is shared between the indexing pipeline
+(\texttt{ingestion.py}) and the query-analysis step
+(\texttt{search.py}).
+It is written in \textbf{Portuguese} to match the language of the
+corpus and to preserve terminological precision in the few-shot
+examples.
+The placeholder \texttt{\{text\}} is replaced at runtime with the
+chunk or query text.
+
+\begin{lstlisting}
+Você é um linguista cognitivo especialista na Teoria da
+Metáfora Conceptual de Lakoff e nas Dinâmicas de Força de
+Talmy. Sua missão é analisar um texto em português extraído
+de discursos parlamentares, identificar os Esquemas
+Imagéticos dominantes e mapear como eles estruturam
+conceitos abstratos.
+
+Analise o texto seguindo rigorosamente esta taxonomia:
+
+1. MACROESQUEMAS E SUBTIPOS VÁLIDOS:
+- CONTAINER:
+  * INSIDE    (Estar contido, protegido, preso, engessado)
+  * OUTSIDE   (Estar fora, excluído, marginalizado)
+  * BOUNDARY  (Fronteiras, limites, barreiras de contenção)
+  * INTRUSION (Invasão, penetração forçada no recipiente)
+- PATH:
+  * SOURCE     (Ponto de partida, origem, base histórica)
+  * TRAJECTORY (Movimento, progresso, passos, rumo)
+  * GOAL       (Destino, objetivo final, chegada)
+  * DIVERSION  (Desvio de rota, perda de foco, sabotagem)
+- FORCE:
+  * BLOCKAGE     (Bloqueio completo, barreira física/legal)
+  * COMPULSION   (Força externa que empurra, obriga, coage)
+  * RESISTANCE   (Resistência interna, oposição ativa)
+  * COUNTER_FORCE(Duas forças colidindo, embate direto)
+
+2. REGRAS PARA target_domain_pt (lista fechada):
+"Economia" | "Política" | "Infraestrutura e Transportes"
+| "Segurança Pública" | "Justiça" | "Direitos Humanos e
+Cultura" | "Educação" | "Saúde" | "Meio Ambiente"
+| "Relações Internacionais" | "Outros"
+
+3. REGRA DE LITERALIDADE:
+Se o texto for puramente literal, descritivo, técnico ou
+administrativo, retorne listas vazias.
+
+EXEMPLOS (FEW-SHOT):
+
+Texto: "A oposição barrou os avanços da reforma tributária."
+Output:
+{"schemas": ["FORCE","PATH"], "details": [
+  {"schema_name":"FORCE","sub_type":"BLOCKAGE",
+   "anchor_word_pt":"barrou",
+   "target_domain_pt":"Política"},
+  {"schema_name":"PATH","sub_type":"TRAJECTORY",
+   "anchor_word_pt":"avanços",
+   "target_domain_pt":"Economia"}
+]}
+
+Texto: "A inflação empurrou as famílias para a crise."
+Output:
+{"schemas": ["FORCE"], "details": [
+  {"schema_name":"FORCE","sub_type":"COMPULSION",
+   "anchor_word_pt":"empurrou",
+   "target_domain_pt":"Economia"}
+]}
+
+Texto: "Quero saudar a presença do Vereador Júnior."
+Output: {"schemas": [], "details": []}
+
+---
+Analise o texto a seguir e retorne o JSON estrito.
+
+Texto para análise:
+{text}
+\end{lstlisting}
+
+% =================================================================
+\section{IS-RAG Algorithms}
+\label{app:algorithms}
+
+\subsection{Indexing Pipeline}
+
+\begin{algorithm}[H]
+\caption{IS-RAG Indexing}\label{alg:index}
+\begin{algorithmic}[1]
+\Require Corpus $\mathcal{D}$, chunk size $w{=}150$,
+         encoder $\mathcal{E}$, LLM parser $\mathcal{P}$
+\Ensure  Populated vector store $\mathcal{S}$
+\For{each document $d \in \mathcal{D}$}
+  \State $C \gets \textsc{SemanticChunk}(d,\,w)$
+  \Comment{sentence-boundary split}
+  \State $\mathbf{E}_t \gets [\,\mathcal{E}(c) \mid c \in C\,]$
+  \Comment{text embeddings, 768d}
+  \State $M \gets [\,\mathcal{P}(c) \mid c \in C\,]$
+  \Comment{concurrent LLM calls, 5 workers}
+  \For{$i \gets 1$ \textbf{to} $|C|$}
+    \State $\mathbf{e}_c \gets \mathcal{E}(\textsc{Serialize}(M_i))$
+    \Comment{cognitive embedding}
+    \State $\mathcal{S}.\textsc{Insert}(C_i,\,\mathbf{E}_{t,i},\,\mathbf{e}_c,\,M_i)$
+  \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Query-Time Retrieval}
+
+\begin{algorithm}[H]
+\caption{IS-RAG Retrieval}\label{alg:retrieve}
+\begin{algorithmic}[1]
+\Require Query $q$, mode $m \in \{\text{text, cognitive, hybrid}\}$,
+         top-$k$, store $\mathcal{S}$, $\alpha{=}0.4$, $\beta{=}0.3$
+\Ensure  Ranked list of $k$ chunks
+\State $(\Sigma_q, \Delta_q) \gets \mathcal{P}(q)$
+\Comment{detected schemas and domains}
+\State $\mathbf{e}_{q,t} \gets \mathcal{E}(q)$;\;
+       $\mathbf{e}_{q,c} \gets \mathcal{E}(\textsc{Serialize}(\mathcal{P}(q)))$
+\For{each chunk $(C_i,\,\mathbf{e}_{t,i},\,\mathbf{e}_{c,i},\,M_i) \in \mathcal{S}$}
+  \State $s_t \gets \cos(\mathbf{e}_{q,t},\,\mathbf{e}_{t,i})$;\;
+         $s_c \gets \cos(\mathbf{e}_{q,c},\,\mathbf{e}_{c,i})$
+  \State $s \gets \begin{cases}
+    s_t & \text{if } m = \text{text} \\
+    s_c & \text{if } m = \text{cognitive} \\
+    (s_t + s_c)/2 & \text{if } m = \text{hybrid}
+  \end{cases}$
+  \State $n \gets |M_i.\text{details}|$
+  \State $\sigma \gets |\{d \in M_i.\text{details} \mid d.\text{schema} \in \Sigma_q\}|
+                       \;/\; \max(n,1)$
+  \State $\delta \gets |\{d \in M_i.\text{details} \mid d.\text{domain} \in \Delta_q\}|
+                       \;/\; \max(n,1)$
+  \State $\hat{s}_i \gets s \cdot (1 + \alpha\,\sigma + \beta\,\delta)$
+  \Comment{Eq.~\ref{eq:boosting}}
+\EndFor
+\State \Return $\textsc{TopK}(\{\hat{s}_i\},\,k)$
+\end{algorithmic}
+\end{algorithm}
+
+\end{document}

@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: is_rag_postgres
+    environment:
+      POSTGRES_USER: is_rag_user
+      POSTGRES_PASSWORD: is_rag_password
+      POSTGRES_DB: is_rag_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/dbdata
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
