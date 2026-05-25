@@ -255,14 +255,8 @@ A Figura~\ref{fig:pipeline} ilustra o pipeline IS-RAG.
 O pseudocódigo formal encontra-se no Apêndice~\ref{app:algorithms}.
 
 \begin{figure}[H]
-  \figplaceholder{4.5cm}{%
-    Arquitetura IS-RAG: \textbf{esquerda} = pipeline de indexação
-    (corpus $\to$ segmentação $\to$ embeddings duais + analisador
-    cognitivo $\to$ PostgreSQL/pgvector);
-    \textbf{direita} = recuperação em tempo de consulta
-    (consulta $\to$ análise cognitiva $\to$ pontuação híbrida +
-    boosting $\to$ resultados ranqueados).%
-  }
+  \centering
+  \includegraphics[width=1\textwidth]{images/PT_Pipeline_pt-br_.png}
   \caption{Visão geral do IS-RAG: etapas de indexação e recuperação.}
   \label{fig:pipeline}
 \end{figure}
@@ -433,13 +427,8 @@ Q10 & \textsc{Force+Path} / Rel.\ Int.        & 0,5397 & 0,6488 & $-$0,109 \\
 \end{table}
 
 \begin{figure}[H]
-  \figplaceholder{4cm}{%
-    Gráfico de barras: $\Delta$ NDCG@5 por consulta (Q2--Q10),
-    colorido por família de esquema —
-    \textsc{Force} (azul), \textsc{Container} (laranja),
-    \textsc{Path} (verde), Cross (roxo).
-    Linha de referência horizontal em $\Delta = 0$.%
-  }
+  \centering
+  \includegraphics[width=1\textwidth]{images/PT_Results_pt-br_.png}
   \caption{$\Delta$ NDCG@5 por consulta (IS-RAG $-$ linha de base).}
   \label{fig:results}
 \end{figure}
@@ -578,6 +567,7 @@ disponíveis em \url{https://github.com/yanjustino/is-rag}.
 \setcounter{section}{0}
 \renewcommand{\thesection}{\Alph{section}}
 
+\pagebreak
 \section{Prompt de Análise Cognitiva}
 \label{app:prompt}
 

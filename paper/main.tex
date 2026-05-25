@@ -238,14 +238,8 @@ Figure~\ref{fig:pipeline} illustrates the IS-RAG pipeline. Formal
 pseudo-code is given in Appendix~\ref{app:algorithms}.
 
 \begin{figure}[H]
-  \figplaceholder{4.5cm}{%
-    IS-RAG architecture: \textbf{left} = indexing pipeline
-    (corpus $\to$ chunking $\to$ dual embeddings + cognitive
-    parser $\to$ PostgreSQL/pgvector);
-    \textbf{right} = query-time retrieval
-    (query $\to$ cognitive analysis $\to$ hybrid scoring +
-    boosting $\to$ ranked results).%
-  }
+  \centering
+  \includegraphics[width=1\textwidth]{images/EN_Pipeline_en-us_.png}
   \caption{IS-RAG overview: indexing and retrieval steps.}
   \label{fig:pipeline}
 \end{figure}
@@ -416,13 +410,8 @@ Q10 & \textsc{Force+Path} / Intl.\ Rel.       & 0.5397 & 0.6488 & $-$0.109 \\
 \end{table}
 
 \begin{figure}[H]
-  \figplaceholder{4cm}{%
-    Bar chart: $\Delta$ NDCG@5 per query (Q2--Q10),
-    coloured by schema family —
-    \textsc{Force} (blue), \textsc{Container} (orange),
-    \textsc{Path} (green), Cross (purple).
-    Horizontal reference line at $\Delta = 0$.%
-  }
+  \centering
+  \includegraphics[width=1\textwidth]{images/EN_Results_en-us_.png}
   \caption{Per-query $\Delta$ NDCG@5 (IS-RAG $-$ baseline).}
   \label{fig:results}
 \end{figure}
@@ -560,6 +549,7 @@ Code, corpus, and annotated ground truth are publicly available at
 \setcounter{section}{0}
 \renewcommand{\thesection}{\Alph{section}}
 
+\pagebreak
 \section{Cognitive Analysis Prompt}
 \label{app:prompt}
 
