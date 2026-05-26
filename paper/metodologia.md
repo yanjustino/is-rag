@@ -357,6 +357,26 @@ O IS-RAG foi avaliado em um corpus específico e homogêneo (discurso parlamenta
 
 ---
 
+### A origem desta pesquisa — dupla formação
+
+Esta pesquisa é o encontro de duas trajetórias que percorri em paralelo por anos sem saber exatamente onde elas iriam se cruzar.
+
+Na graduação em Letras pela UFRN, tive contato com a Linguística Cognitiva durante a Iniciação Científica — Lakoff, Johnson, Talmy, os esquemas imagéticos, a ideia de que a linguagem não é arbitrária mas moldada pela experiência corporal no espaço. Aquilo me fascinou de um jeito que não consegui nomear na época: a sensação de que havia uma camada profunda da linguagem que organizava o pensamento abstraío em padrões reconhecíveis, quase físicos.
+
+Em paralelo — e depois, com mais intensidade — segui a Computação. Graduação em Sistemas de Informação pela UNP, Mestrado em Engenharia de Software pela UFRN, e agora o doutorado na CESAR School em Recife. A computação me deu as ferramentas; a IA Generativa, mais recentemente, me devolveu a linguagem — desta vez como objeto técnico, como dado, como vetor num espaço de alta dimensão.
+
+Por muito tempo essas duas formações coexistiram sem se tocar. A Linguística Cognitiva ficou guardada como uma paixão de graduação, um campo que eu achava lindo mas que parecia distante da engenharia de software. A Computação avançou pelo seu próprio caminho.
+
+O IS-RAG é onde elas finalmente se encontram.
+
+A ideia de indexar esquemas imagéticos para recuperação de informação só poderia surgir de alguém que teve as duas formações ao mesmo tempo — que soubesse o que são FORCE e CONTAINER como conceitos cognitivos *e* soubesse o que é um embedding vetorial, um índice HNSW, uma pipeline de RAG. Não é uma ideia óbvia em nenhuma das duas áreas isoladamente. É uma ideia que vive na fronteira.
+
+Trabalhar com IA Generativa tem sido o que tornou isso possível na prática. Os LLMs têm um laço profundo com a linguagem — mais profundo do que qualquer sistema computacional anterior — e isso criou uma infraestrutura onde uma hipótese linguística pode ser testada computacionalmente com relativa agilidade. O Cognitive Parser que detecta schemas imagéticos num discurso parlamentar é, em certo sentido, um linguista cognitivo artificialmente instanciado.
+
+Não sei se o IS-RAG vai se tornar algo maior. Mas sei que ele já cumpriu uma função que vai além dos números do NDCG@5: provou para mim que as duas formações não eram trajetórias paralelas que nunca se cruzariam. Eram, desde o início, partes da mesma pergunta.
+
+---
+
 ### O peso de FORCE num corpus de polarização
 
 O resultado quantitativo mais robusto do experimento é que IS-RAG ganha onde FORCE domina. As três queries FORCE têm Δ positivo consistente (+0.3067, +0.2503, +0.0730), enquanto PATH e CONTAINER ficam neutros ou negativos. Isso poderia ser explicado tecnicamente — vocabulário metafórico mais saliente, maior densidade de subtipos no corpus, etc. Mas há uma leitura mais interessante.
