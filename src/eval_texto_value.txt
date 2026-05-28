@@ -1,0 +1,46 @@
+[*] Carregando ground truth: /Users/yanjustino/Documents/yanjustino.me/yanjustino.research/is-rag/src/data/ground_truth_real.json
+[!] Modo forçado: texto para todas as queries
+
+[*] 10 queries válidas | tabela=document_chunks | top-k=5
+
+[*] Executando 10 queries × 2 buscas com 4 workers...
+
+  [ 1/20] Q 2 IS-RAG   — ok
+  [ 2/20] Q 1 IS-RAG   — ok
+  [ 3/20] Q 2 baseline — ok
+  [ 4/20] Q 1 baseline — ok
+  [ 5/20] Q 4 baseline — ok
+  [ 6/20] Q 3 IS-RAG   — ok
+  [ 7/20] Q 3 baseline — ok
+  [ 8/20] Q 4 IS-RAG   — ok
+  [ 9/20] Q 5 IS-RAG   — ok
+  [10/20] Q 6 baseline — ok
+  [11/20] Q 5 baseline — ok
+  [12/20] Q 6 IS-RAG   — ok
+  [13/20] Q 7 IS-RAG   — ok
+  [14/20] Q 7 baseline — ok
+  [15/20] Q 8 IS-RAG   — ok
+  [16/20] Q 8 baseline — ok
+  [17/20] Q 9 IS-RAG   — ok
+  [18/20] Q10 IS-RAG   — ok
+  [19/20] Q 9 baseline — ok
+  [20/20] Q10 baseline — ok
+
+============================================================================
+Cenário                                    Modo   IS-RAG   Baseline        Δ
+============================================================================
+Q 1 — CONTAINER/INSIDE / Saúde            texto   0.6377     0.5397  +0.0980
+Q 2 — FORCE/COMPULSION / Economia         texto   0.7264     0.6804  +0.0460
+Q 3 — FORCE/COUNTER_FORCE / Justiça       texto   0.7946     0.9236  -0.1290
+Q 4 — FORCE/RESISTANCE / Política         texto   0.2648     0.7648  -0.5000
+Q 5 — CONTAINER/INTRUSION / Justiça       texto   0.7084     0.9085  -0.2001
+Q 6 — CONTAINER/OUTSIDE / Direitos Hu     texto   0.4666     0.6053  -0.1387
+Q 7 — PATH/TRAJECTORY / Economia          texto   0.7828     0.6500  +0.1328
+Q 8 — PATH/SOURCE / Política              texto   0.5973     0.4758  +0.1214
+Q 9 — PATH/DIVERSION / Política           texto   0.6846     0.4788  +0.2058
+Q10 — FORCE/COMPULSION + PATH/DIVERSI     texto   0.7110     0.6379  +0.0730
+────────────────────────────────────────────────────────────────────────────
+Média (10 queries)                            —   0.6374     0.6665  -0.0291
+============================================================================
+
+NDCG@5  IS-RAG=0.6374  Baseline=0.6665  Δ=-0.0291

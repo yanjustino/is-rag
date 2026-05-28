@@ -97,12 +97,10 @@
 
   \vspace{0.8em}
 
-  % TODO: fill in author names
   {\normalsize
-    Author One$^1$ \quad Author Two$^1$ \quad Author Three$^2$ \\[4pt]
-    $^1$ Institution One \quad $^2$ Institution Two \\[4pt]
-    \texttt{\{author1,author2\}@inst1.edu} \quad
-    \texttt{author3@inst2.edu}
+    Yan Justino$^{1,2}$ \\[4pt]
+    $^1$ CESAR School \quad $^2$ Itaú Unibanco \\[4pt]
+    \texttt{contact@yanjustino.com}
   }
 
   \vspace{0.6em}
@@ -111,34 +109,56 @@
 
 % =================================================================
 \begin{abstract}
-We introduce \textbf{IS-RAG}, a technique that augments
-standard dense retrieval with
-\emph{image-schema cognitive boosting} grounded in the cognitive
-linguistics of \citet{lakoff1980} and \citet{talmy1988}.
-During indexing, each document chunk is annotated by an LLM-based
-\emph{Cognitive Parser} that identifies image schemas
-(\textsc{Force}, \textsc{Container}, \textsc{Path}) and their
-subtypes, storing them as structured metadata alongside two
-independent vector embeddings—one over raw text, one over the
-serialised cognitive structure.
-At query time, IS-RAG detects schemas in the query and applies
-a continuous proportional score boost to chunks that share the same
-cognitive structure, enabling \emph{cross-domain} retrieval driven
-by abstract spatial metaphor rather than lexical overlap.
-We evaluate IS-RAG on a corpus of 121 Brazilian parliamentary
-speeches in \textbf{Portuguese} using TREC-style pooling and
-NDCG@5.
-Over 9 valid evaluation queries (3~\textsc{Force} $+$
-2~\textsc{Container} $+$ 3~\textsc{Path} $+$ 1~cross-schema),
-IS-RAG achieves a mean NDCG@5 of 0.7073 vs.\ 0.6947 for a
-dense-retrieval baseline ($\Delta = +0.013$).
-Schema-family-weighted analysis reveals that gains concentrate in
-\textsc{Force} queries ($\Delta = +0.210$) while
-\textsc{Container} and \textsc{Path} show neutral or negative
-results ($\Delta_\text{family-weighted} = -0.017$).
-We document methodological findings including the requirement for
-\emph{assertive metaphorical query formulation} and the
-non-annotability of conventionalised schemas.
+\textbf{Objective.}
+Dense retrieval systems fail when the user and the document express
+the same conceptual structure through distinct vocabularies — a
+phenomenon we term the \emph{lexical-cognitive gap}.
+This paper presents \textbf{IS-RAG}, a pilot study that investigates
+whether explicit indexing of \emph{image schemas}
+\citep{lakoff1980,talmy1988} — pre-linguistic patterns such as
+\textsc{Force}, \textsc{Container}, and \textsc{Path} — can bridge
+this gap in a corpus of Portuguese political discourse.
+
+\textbf{Method.}
+During indexing, an LLM-based \emph{Cognitive Parser} annotates each
+chunk with the image schemas present, generating structured metadata
+stored alongside two independent vector embeddings: one textual and
+one cognitive.
+At query time, schemas detected in the query trigger a
+\emph{proportional boost} over chunks sharing the same cognitive
+structure, enabling retrieval driven by abstract spatial metaphor
+beyond lexical overlap.
+
+\textbf{Evaluation.}
+We construct a TREC-style ground truth over 121 Brazilian
+parliamentary speeches (171 chunks), with 10 valid queries
+(3~\textsc{Force} $+$ 3~\textsc{Container} $+$ 3~\textsc{Path} $+$
+1~cross-schema) annotated by an independent LLM
+(\texttt{claude-opus-4-7}, distinct from the Cognitive Parser) on a
+0--3 scale.
+The primary metric is NDCG@5; the baseline is dense retrieval without
+cognitive boosting.
+
+\textbf{Findings.}
+An ablation over three retrieval modes reveals that
+\emph{text-mode boosting} — proportional cognitive boosting applied
+over text-embedding similarity — is the most effective configuration,
+achieving a mean NDCG@5 of 0.7793 vs.\ 0.6881 for the baseline
+($\Delta = +0.091$).
+Using the cognitive embedding as the primary search vector degrades
+performance ($\Delta_\text{cognitive} = -0.192$;
+$\Delta_\text{hybrid} = -0.090$), localising the IS-RAG contribution
+in the boosting mechanism rather than in dual-embedding retrieval.
+\textsc{Force} queries benefit most consistently
+($\Delta_\text{FORCE} = +0.267$); \textsc{Path} is net positive
+across all three queries ($\Delta_\text{PATH} = +0.085$);
+\textsc{Container} shows a near-zero mean effect
+($\Delta_\text{CONT} = -0.017$).
+Two additional methodological findings emerge: (1)~queries must be
+formulated as \emph{assertive metaphorical statements} to activate
+the cognitive component; (2)~schema frequency in the corpus does not
+predict \emph{boostability} — conventionalised schemas carry no
+discriminative re-ranking signal.
 \end{abstract}
 
 \noindent\textbf{Keywords:} retrieval-augmented generation $\cdot$ image schemas $\cdot$ cognitive linguistics $\cdot$ information retrieval $\cdot$ natural language processing $\cdot$ metaphor detection $\cdot$ dense retrieval $\cdot$ political discourse $\cdot$ semantic search $\cdot$ embodied cognition
@@ -239,7 +259,7 @@ parliamentary language.
 Figure~\ref{fig:pipeline} illustrates the IS-RAG pipeline. Formal
 pseudo-code is given in Appendix~\ref{app:algorithms}.
 
-\begin{figure}[H]
+\begin{figure}[h]
   \centering
   \includegraphics[width=1\textwidth]{images/EN_Pipeline_en-us_.png}
   \caption{IS-RAG overview: indexing and retrieval steps.}
@@ -295,7 +315,7 @@ investigation—the cognitive boosting signal itself.
 
 The Cognitive Parser sends each chunk to
 \texttt{claude-haiku-4-5} \citep{anthropic2024} using a shared prompt
-(Appendix~\ref{app:prompt}) and extracts structured JSON validated by
+(available at \url{https://github.com/yanjustino/is-rag}) and extracts structured JSON validated by
 a Pydantic schema. The taxonomy follows \citet{lakoff1980} and
 \citet{talmy1988}:
 
@@ -322,10 +342,27 @@ The corpus yields 92~\textsc{Path}, 88~\textsc{Container}, and
 \subsection{Hybrid Search and Cognitive Boosting}
 \label{sec:boosting}
 
-IS-RAG supports three retrieval modes: \emph{text} (text embedding
-only), \emph{cognitive} (cognitive embedding only), and \emph{hybrid}
-(mean of both similarities). After computing the base vector
-similarity~$s$, a \emph{proportional cognitive boost} is applied:
+IS-RAG supports three retrieval modes.
+In all three, the Cognitive Parser runs on the query at retrieval time
+to detect schemas ($\Sigma_q$) and target domains ($\Delta_q$).
+The modes differ only in how the base similarity~$s$ is computed
+before the boost:
+
+\begin{itemize}[noitemsep,topsep=2pt]
+  \item \textbf{Text:} $s = \cos(\mathbf{e}_{q,t},\,\mathbf{e}_{t,i})$
+        — the query's raw-text embedding is matched against chunk text
+        embeddings.  The cognitive information contributes only via the
+        boost.
+  \item \textbf{Cognitive:} $s = \cos(\mathbf{e}_{q,c},\,\mathbf{e}_{c,i})$
+        — the query's Cognitive Parser output is serialised using the
+        same \texttt{schema\,$\to$\,domain} format as indexing,
+        embedded, and matched against chunk cognitive embeddings.
+  \item \textbf{Hybrid:} $s = \bigl(s_t + s_c\bigr)/2$
+        — arithmetic mean of text and cognitive similarities.
+\end{itemize}
+
+After computing~$s$, the same \emph{proportional cognitive boost} is
+applied in all three modes:
 
 \begin{equation}
   \label{eq:boosting}
@@ -333,12 +370,12 @@ similarity~$s$, a \emph{proportional cognitive boost} is applied:
 \end{equation}
 
 \noindent where $\sigma$ is the fraction of a chunk's cognitive
-details whose \texttt{schema\_name} matches a schema detected in the
-query, and $\delta$ is the analogous fraction for
-\texttt{target\_domain}.
+details whose \texttt{schema\_name} matches a schema in~$\Sigma_q$,
+and $\delta$ is the analogous fraction for \texttt{target\_domain}
+against~$\Delta_q$.
 Weights ($\alpha{=}0.4$, $\beta{=}0.3$) were set by design; schema
 structure is the primary signal, domain the secondary reinforcement.
-The baseline disables the Cognitive Parser and applies pure
+The baseline disables the Cognitive Parser entirely and applies pure
 text-embedding retrieval without boosting.
 
 % =================================================================
@@ -351,7 +388,7 @@ We construct a TREC-style pooled ground truth
 For each query, IS-RAG (hybrid) and the baseline independently
 retrieve the top-10 chunks; the union ($\approx$14--18 unique chunks
 per query) is annotated for relevance~(0--3) by an LLM
-(\texttt{claude-haiku-4-5}).
+(\texttt{claude-opus-4-7}).
 Scores~$\geq 2$ require the annotator to cite an anchor word and
 schema subtype as traceable evidence.
 Queries with IDCG$=0$ (no chunk with score~$\geq 2$) are excluded
@@ -359,8 +396,8 @@ Queries with IDCG$=0$ (no chunk with score~$\geq 2$) are excluded
 query (see \S\ref{sec:discussion}).
 
 \paragraph{Query Design.}
-Nine valid queries are designed with three properties:
-(1)~taxonomic coverage (3~\textsc{Force} $+$ 2~\textsc{Container} $+$
+Ten valid queries are designed with three properties:
+(1)~taxonomic coverage (3~\textsc{Force} $+$ 3~\textsc{Container} $+$
 3~\textsc{Path} $+$ 1~cross-schema);
 (2)~deliberate lexical gap (queries use assertive metaphorical
 language, avoiding the literal vocabulary expected in documents);
@@ -377,13 +414,170 @@ relevance grades, MRR saturates at~1.0 regardless of ranking quality
 \section{Results}
 \label{sec:results}
 
-\subsection{Per-Query Results}
+\subsection{Retrieval Mode Ablation}
+\label{sec:ablation}
 
-Table~\ref{tab:perquery} reports NDCG@5 for IS-RAG and the baseline
-across all 9~valid queries (hybrid mode).
-Figure~\ref{fig:results} visualises the per-query $\Delta$.
+Table~\ref{tab:modes} compares all three IS-RAG retrieval modes against
+the baseline.
+Text mode is the only configuration that surpasses the baseline;
+cognitive and hybrid modes both degrade retrieval.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Mode} & \textbf{IS-RAG} & \textbf{Baseline} & $\boldsymbol{\Delta}$ \\
+\midrule
+\textbf{Text}  & \textbf{0.7793} & 0.6881 & \textbf{+0.091} \\
+Hybrid         & 0.5979          & 0.6881 & $-$0.090 \\
+Cognitive      & 0.4958          & 0.6881 & $-$0.192 \\
+\midrule
+Baseline       & —               & 0.6881 & — \\
+\bottomrule
+\end{tabular}
+\caption{Mean NDCG@5 across 10 queries by retrieval mode
+  (independent Opus annotator).
+  Text mode is the strongest IS-RAG configuration.}
+\label{tab:modes}
+\end{table}
+
+Table~\ref{tab:modes_compare} breaks down $\Delta$ NDCG@5 per query
+across all three modes, revealing which queries and schema families
+drive the aggregate results.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{clccc}
+\toprule
+\textbf{Q} & \textbf{Schema / Domain} & \textbf{$\Delta$ Text} & \textbf{$\Delta$ Cog.} & \textbf{$\Delta$ Hyb.} \\
+\midrule
+Q1  & \textsc{Cont.}/Inside / Health            & 0.000           & $-$0.396        & $-$0.362 \\
+Q2  & \textsc{Force}/Compulsion / Economics    & \textbf{+0.390} & +0.138          & +0.138 \\
+Q3  & \textsc{Force}/Counter\_F / Justice      & \textbf{+0.221} & $-$0.504        & $-$0.277 \\
+Q4  & \textsc{Force}/Resistance / Politics     & \textbf{+0.189} & +0.236          & +0.150 \\
+\midrule
+Q5  & \textsc{Cont.}/Intrusion / Justice       & $-$0.096        & $-$0.221        & $-$0.191 \\
+Q6  & \textsc{Cont.}/Outside / Human Rights    & +0.046          & $-$0.172        & +0.046 \\
+\midrule
+Q7  & \textsc{Path}/Trajectory / Economics     & +0.036          & $-$0.188        & $-$0.007 \\
+Q8  & \textsc{Path}/Source / Politics          & \textbf{+0.111} & $-$0.555        & $-$0.424 \\
+Q9  & \textsc{Path}/Diversion / Politics       & +0.109          & $-$0.225        & +0.120 \\
+\midrule
+Q10 & \textsc{Force+Path} / Intl.\ Rel.        & $-$0.094        & $-$0.038        & $-$0.094 \\
+\midrule
+\multicolumn{2}{l}{\textbf{Mean}} & \textbf{+0.091} & $-$0.192 & $-$0.090 \\
+\bottomrule
+\end{tabular}
+\caption{$\Delta$ NDCG@5 per query across all three IS-RAG modes
+  (independent Opus annotator, 10~queries).
+  Q1 (\textsc{Container}/\textsc{Inside}) shows $\Delta{=}0$ in text
+  mode: the boost adds nothing for the most conventionalised subtype.
+  Text mode is the most consistently positive across all families.}
+\label{tab:modes_compare}
+\end{table}
+
+\paragraph{Why cognitive mode fails.}
+In cognitive mode, serialised schema strings are the sole search
+vectors.
+With 171~chunks sharing overlapping schemas (PATH~92$\times$,
+CONTAINER~88$\times$, FORCE~83$\times$), cosine similarities in this
+space are tightly clustered, producing a noisy base ranking that
+boosting cannot correct ($\Delta = -0.192$; Q8 degrades to
+NDCG$\,{=}\,0.127$, Q1 to $0.127$).
+
+\paragraph{Why hybrid mode fails.}
+Hybrid mode averages $s_t$ and $s_c$ before boosting.
+The noisy cognitive-embedding component contaminates the text signal,
+pushing the base ranking below what pure text retrieval achieves
+($\Delta = -0.090$).
+
+\paragraph{Architectural implication.}
+IS-RAG's value is a \emph{proportional re-ranking signal} derived from
+schema metadata ($\sigma$,~$\delta$), not dual-embedding retrieval.
+The \texttt{cognitive\_embedding} column is necessary for indexing
+(computing $\sigma$) but counterproductive as a search vector.
+Retaining \texttt{cognitive\_metadata} while using text-only similarity
+as the base captures the full IS-RAG gain without the degradation
+caused by hybrid or cognitive search.
+
+\subsection{Robustness Validation: LLM Echo Effect}
+\label{sec:robustness}
+
+To rule out LLM echo as the source of the text-mode gain, we
+re-annotated the relevance pool with \texttt{claude-opus-4-7}, a model
+independent of the \texttt{claude-haiku-4-5} Cognitive Parser used at
+indexing time.
+Table~\ref{tab:annotator} reports text-mode NDCG@5 under both
+annotators.
+The $\Delta$ stays within one percentage point ($+0.091$ vs.\
+$+0.093$); the independent annotator also resolves a previously
+unannotable query (Q1 \textsc{Container}/\textsc{Inside}, IDCG${=}0$
+with Haiku), expanding the evaluation to 10~valid queries.
 
 \begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Annotator} & \textbf{Relation to parser} & \textbf{Queries} & \textbf{Baseline} & \textbf{IS-RAG} & \textbf{$\Delta$} \\
+\midrule
+\texttt{claude-haiku-4-5} & Same model & 9  & 0.6947 & 0.7873 & \textbf{+0.093} \\
+\texttt{claude-opus-4-7}  & Independent & 10 & 0.6881 & 0.7793 & \textbf{+0.091} \\
+\bottomrule
+\end{tabular}
+\caption{Text-mode NDCG@5 under two annotator configurations.
+  The gain persists ($\Delta \approx +0.09$) under independent
+  evaluation, ruling out LLM echo as the primary explanation.}
+\label{tab:annotator}
+\end{table}
+
+\subsection{Embedding Utility Frontier}
+\label{sec:embedding}
+
+To test whether the text-mode gain survives a stronger base embedding,
+we re-indexed the corpus with \texttt{BAAI/bge-m3} (1024d) and
+re-annotated the pool with the same independent Opus annotator.
+Table~\ref{tab:embedding} compares IS-RAG $\Delta$ across all three
+modes for both models.
+The text-mode gain collapses to $\Delta \approx 0$; hybrid and cognitive
+degradation remain stable across models.
+Q4 (\textsc{Force}/\textsc{Resistance}) drives the collapse: its
+baseline rises from $0.489$ (mpnet) to $0.830$ (bge-m3), indicating the
+stronger model already retrieves the correct documents without schema
+assistance.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Embedding} & \textbf{$\Delta$ Text} & \textbf{$\Delta$ Hybrid} & \textbf{$\Delta$ Cognitive} \\
+\midrule
+\texttt{mpnet-base-v2} (768d) & \textbf{+0.091} & $-$0.090 & $-$0.192 \\
+\texttt{bge-m3}        (1024d) & $\approx$0.001  & $-$0.068 & $-$0.202 \\
+\bottomrule
+\end{tabular}
+\caption{IS-RAG $\Delta$ NDCG@5 across retrieval modes under two base
+  embedding models (10~queries, independent Opus annotator).
+  The text-mode gain is embedding-dependent: \texttt{bge-m3} closes the
+  lexical-cognitive gap that IS-RAG compensated for with
+  \texttt{mpnet-base-v2}.}
+\label{tab:embedding}
+\end{table}
+
+\subsection{Per-Query Results (Text Mode)}
+
+Table~\ref{tab:perquery} reports NDCG@5 for IS-RAG text mode —
+the strongest configuration (\S\ref{sec:ablation}) — against the
+baseline across all 10~valid queries (independent Opus annotator).
+
+\begin{table}[h]
 \centering
 \small
 \setlength{\tabcolsep}{4pt}
@@ -391,61 +585,77 @@ Figure~\ref{fig:results} visualises the per-query $\Delta$.
 \toprule
 \textbf{Q} & \textbf{Schema / Domain} & \textbf{IS-RAG} & \textbf{Base} & $\boldsymbol{\Delta}$ \\
 \midrule
-Q2 & \textsc{Force}/Compulsion / Economics    & 0.8375 & 0.5308 & \textbf{+0.307} \\
-Q3 & \textsc{Force}/Counter\_F / Justice      & 0.9093 & 0.6590 & \textbf{+0.250} \\
-Q4 & \textsc{Force}/Resistance / Politics     & 0.6548 & 0.5818 & +0.073 \\
+Q1  & \textsc{Cont.}/Inside / Health           & 0.5221 & 0.5221 & 0.000 \\
+Q2  & \textsc{Force}/Compulsion / Economics    & 1.0000 & 0.6100 & \textbf{+0.390} \\
+Q3  & \textsc{Force}/Counter\_F / Justice      & 0.9323 & 0.7116 & \textbf{+0.221} \\
+Q4  & \textsc{Force}/Resistance / Politics     & 0.6787 & 0.4896 & \textbf{+0.189} \\
 \midrule
-Q5 & \textsc{Cont.}/Intrusion / Justice       & 0.6403 & 0.9105 & $-$0.270 \\
-Q6 & \textsc{Cont.}/Outside / Human Rights    & 0.7833 & 0.7226 & +0.061 \\
+Q5  & \textsc{Cont.}/Intrusion / Justice       & 0.7791 & 0.8754 & $-$0.096 \\
+Q6  & \textsc{Cont.}/Outside / Human Rights    & 0.6993 & 0.6534 & +0.046 \\
 \midrule
-Q7 & \textsc{Path}/Trajectory / Economics     & 0.6488 & 0.6488 & $\pm$0.000 \\
-Q8 & \textsc{Path}/Source / Politics          & 0.5745 & 0.6972 & $-$0.123 \\
-Q9 & \textsc{Path}/Diversion / Politics       & 0.7777 & 0.8527 & $-$0.075 \\
+Q7  & \textsc{Path}/Trajectory / Economics     & 0.8200 & 0.7840 & +0.036 \\
+Q8  & \textsc{Path}/Source / Politics          & 0.7929 & 0.6819 & \textbf{+0.111} \\
+Q9  & \textsc{Path}/Diversion / Politics       & 0.7467 & 0.6377 & +0.109 \\
 \midrule
-Q10 & \textsc{Force+Path} / Intl.\ Rel.       & 0.5397 & 0.6488 & $-$0.109 \\
+Q10 & \textsc{Force+Path} / Intl.\ Rel.        & 0.8215 & 0.9155 & $-$0.094 \\
 \midrule
-\multicolumn{2}{l}{\textbf{Mean (9 queries)}} & \textbf{0.7073} & \textbf{0.6947} & \textbf{+0.013} \\
+\multicolumn{2}{l}{\textbf{Mean (10 queries)}} & \textbf{0.7793} & \textbf{0.6881} & \textbf{+0.091} \\
 \bottomrule
 \end{tabular}
-\caption{NDCG@5 (IS-RAG vs.\ baseline, hybrid mode). Queries grouped by schema family.}
+\caption{NDCG@5 (IS-RAG text mode vs.\ baseline, independent Opus annotator).
+  Queries grouped by schema family. All 10~valid queries shown.
+  Q1 $\Delta{=}0$: cognitive boost is inert for conventionalised
+  \textsc{Container}/\textsc{Inside}.}
 \label{tab:perquery}
 \end{table}
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=1\textwidth]{images/EN_Results_en-us_.png}
-  \caption{Per-query $\Delta$ NDCG@5 (IS-RAG $-$ baseline).}
-  \label{fig:results}
-\end{figure}
+%\begin{figure}[h]
+%  \centering
+%  \includegraphics[width=1\textwidth]{images/EN_Results_text_mode.png}
+%  \caption{Per-query $\Delta$ NDCG@5 (IS-RAG text mode vs.\ baseline).
+%    Queries grouped by schema family; complete values in
+%    Table~\ref{tab:perquery}.}
+%  \label{fig:results}
+%\end{figure}
 
 \subsection{Per-Schema Analysis}
 
-Table~\ref{tab:schema} aggregates results by schema family. The
-unweighted mean ($\Delta{=}{+}0.013$) masks strong heterogeneity:
-\textsc{Force} drives all the gains, while \textsc{Container} and
-\textsc{Path} are neutral or negative.
-Equal-weighting across the four schema families yields
-$\Delta_\text{family}{=}{-}0.017$.
+Table~\ref{tab:schema} aggregates text-mode results by schema family
+(complete data, all 10~queries).
 
-\begin{table}[H]
+\begin{table}[h]
 \centering
 \small
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccp{3.8cm}}
+\begin{tabular}{lccp{4.2cm}}
 \toprule
 \textbf{Family} & \textbf{$n$} & \textbf{Mean $\Delta$} & \textbf{Individual $\Delta$} \\
 \midrule
-\textsc{Force}     & 3 & \textbf{+0.210} & +0.307,\ +0.250,\ +0.073 \\
-\textsc{Container} & 2 & $-$0.105        & $-$0.270,\ +0.061 \\
-\textsc{Path}      & 3 & $-$0.066        & \ 0.000,\ $-$0.123,\ $-$0.075 \\
-Cross              & 1 & $-$0.109        & $-$0.109 \\
+\textsc{Force}     & 3 & \textbf{+0.267} & +0.390,\ +0.221,\ +0.189 \\
+\textsc{Path}      & 3 & +0.085          & +0.036,\ +0.111,\ +0.109 \\
+\textsc{Container} & 3 & $-$0.017        & 0.000,\ $-$0.096,\ +0.046 \\
+Cross              & 1 & $-$0.094        & $-$0.094 \\
 \midrule
-\multicolumn{2}{l}{Family-weighted mean} & $-$0.017 & \\
+\multicolumn{2}{l}{Family-weighted mean} & +0.060 & \\
 \bottomrule
 \end{tabular}
-\caption{NDCG@5 $\Delta$ by schema family (hybrid mode).}
+\caption{NDCG@5 $\Delta$ by schema family (text mode, 10~queries).
+  Families ordered by mean~$\Delta$. \textsc{Force} is the strongest
+  signal; all three \textsc{Path} queries are now positive.}
 \label{tab:schema}
 \end{table}
+
+\textsc{Force} shows the strongest and most consistent signal
+($\Delta = +0.267$; all three queries positive, peak $+0.390$).
+\textsc{Path} is net positive ($+0.085$): all three queries benefit
+(Q7~$+0.036$, Q8~$+0.111$, Q9~$+0.109$).
+\textsc{Container} shows near-zero mean effect ($-0.017$) across
+3~queries: Q1 \textsc{Inside} contributes $\Delta{=}0$
+(boost inert for a conventionalised subtype), Q5 \textsc{Intrusion}
+$-0.096$, Q6 \textsc{Outside} $+0.046$; all substantially less severe
+than in cognitive or hybrid modes (Table~\ref{tab:modes_compare}).
+The family-weighted mean ($+0.060$) confirms positive results across
+the majority of schema families.
 
 % =================================================================
 \section{Discussion}
@@ -453,8 +663,7 @@ Cross              & 1 & $-$0.109        & $-$0.109 \\
 
 \paragraph{Force benefits most from cognitive boosting.}
 All three \textsc{Force} queries show positive~$\Delta$, with
-\textsc{Compulsion} ($+$0.307) and \textsc{Counter\_Force} ($+$0.250)
-as the strongest results.
+\textsc{Compulsion} ($+0.390$) as the strongest result.
 \textsc{Force} schemas tend to use salient, non-conventionalised
 metaphorical vocabulary in parliamentary discourse
 (\emph{pressiona, bloqueia, choca}), making schema detection and
@@ -462,13 +671,21 @@ boosting effective.
 This pattern is corpus-specific and should not be generalised without
 further validation.
 
-\paragraph{Path and Container do not benefit.}
-\textsc{Path} metaphors appear conventionalised in parliamentary
-register to the point that they do not discriminate relevant from
-non-relevant chunks.
-\textsc{Container}/\textsc{Intrusion} (Q5) was designed for
-\emph{cognitive} mode; forced execution in hybrid mode explains part
-of the degradation ($\Delta = -0.270$).
+\paragraph{Path is positive across all queries; Container is near-neutral.}
+In hybrid mode, \textsc{Path} queries degrade severely
+(Q8~$-0.424$, Q7~$-0.007$; Table~\ref{tab:modes_compare}).
+In text mode, all three \textsc{Path} queries benefit: Q8~($+0.111$),
+Q9~($+0.109$), Q7~($+0.036$); family mean $+0.085$.
+The hybrid-mode deficit is therefore an artefact of cognitive-embedding
+noise contaminating the base similarity, not an intrinsic property of
+trajectory metaphors.
+\textsc{Container} shows near-zero mean effect in text mode
+($-0.017$ across 3~queries), substantially less severe than in hybrid
+or cognitive modes.
+Q1 \textsc{Inside} ($\Delta{=}0$) is the key case: even when an
+independent annotator finds relevant documents, the cognitive boost
+cannot distinguish them — the schema is too conventionalised to carry
+a discriminative retrieval signal.
 
 \paragraph{Assertive query formulation is required.}
 The Cognitive Parser applies a literality rule: interrogative or
@@ -479,33 +696,67 @@ Queries must be formulated as \emph{assertive metaphorical statements}
 to activate the cognitive component.
 This is a binding operational constraint for any IS-RAG deployment.
 
-\paragraph{Schema frequency $\neq$ annotability.}
+\paragraph{Schema frequency $\neq$ boostability.}
 Q1 was designed as \textsc{Container}/\textsc{Inside}, the most
 frequent subtype in the corpus (80~occurrences).
-Despite high frequency, the annotator consistently rated
-\textsc{Inside} chunks at score~1 (domain present, schema
-non-salient) rather than $\geq 2$ (clear metaphorical
-instantiation).
+The Haiku annotator consistently rated \textsc{Inside} chunks at
+score~1 (domain present, schema non-salient), yielding IDCG${=}0$.
+The independent Opus annotator finds relevant chunks for Q1 — yet
+IS-RAG achieves $\Delta{=}0$ (IS-RAG $=$ baseline $= 0.522$):
+cognitive boosting adds nothing even when relevant documents exist.
 Spatial containment is so conventionalised in parliamentary discourse
-that it does not constitute a discriminative relevance signal.
-Q1 was excluded (IDCG${=}0$), yielding a final 3-2-3-1 query
-distribution.
+that its schema signal is not discriminative for re-ranking, regardless
+of which model judges relevance.
+The finding generalises from \emph{annotability} to \emph{boostability}:
+the schema is evaluable but carries no useful retrieval signal.
+The final query distribution is 3-3-3-1 (10~valid queries).
+
+\paragraph{IS-RAG as a compensatory layer for embedding limitations.}
+The embedding experiment (\S\ref{sec:embedding}) positions IS-RAG within
+a broader architectural tension: the lexical-cognitive gap the schema
+boost bridges is one that SOTA dense models increasingly close
+\emph{implicitly} through deeper pre-training on diverse multilingual
+corpora.
+This makes IS-RAG particularly valuable in deployment scenarios where
+large-scale embeddings are impractical --- resource-constrained
+environments, on-device retrieval, or regulatory contexts requiring
+locally-hosted models --- where explicit schema boosting recovers a
+substantial portion of the semantic alignment that stronger embeddings
+would otherwise provide natively.
+As embedding technology continues to advance, the marginal value of IS-RAG
+in text mode is expected to diminish further, motivating future work on
+schema-aware retrieval robust to strong base embeddings: domain-specific
+fine-tuning of the Cognitive Parser, schema-conditioned re-rankers, or
+hard schema constraints rather than soft proportional boosts.
+Crucially, hybrid and cognitive degradation remain stable regardless of
+embedding quality (\S\ref{sec:embedding}), confirming that the failure
+of dual-embedding search is structural rather than model-dependent.
 
 \paragraph{Limitations.}
 (1)~The corpus is small and homogeneous (171~chunks, single register,
 Portuguese only); results lack statistical significance tests.
-(2)~\emph{LLM circularity}: the same model annotates, parses, and
-boosts—creating risk that the annotator favours chunks the parser
-indexed with the same schemas as the query.
-A blind human audit on a 20\% sample of the annotated pool will be
-conducted in future work to compute Fleiss' Kappa inter-annotator
-agreement between independent human judges and the LLM annotator.
+(2)~\emph{LLM circularity}: the Cognitive Parser and query parser use
+\texttt{claude-haiku-4-5}; the relevance annotator uses
+\texttt{claude-opus-4-7} (configurable via \texttt{ANNOTATOR\_MODEL}).
+This deliberate model separation breaks the most critical echo loop:
+the evaluator is no longer the same model that indexed document
+schemas.
+Residual risk remains (both are Anthropic/Claude models), and a blind
+human audit on a 20\% pool sample will be conducted in future work to
+compute Fleiss' Kappa inter-annotator agreement.
 (3)~Domain confounding: \textsc{Force} queries cluster in Economics
 and Justice; if the schema co-occurs with those domains in the corpus,
 gains may reflect domain affinity rather than purely cognitive
 structure.
 (4)~Boosting weights ($\alpha{=}0.4$, $\beta{=}0.3$) are fixed design
 choices, not optimised.
+(5)~\emph{Evaluation non-determinism}: the Cognitive Parser introduces
+run-to-run variance in IS-RAG scores.
+A second independent run yields IS-RAG\,=\,0.7716 ($\Delta=+0.077$,
+text mode); the baseline (0.6947) is deterministic and stable.
+The positive direction of $\Delta$ is consistent across both runs;
+the exact magnitude is not.
+Multiple runs with mean\,$\pm$\,std reporting are left for future work.
 
 % =================================================================
 \section{Conclusion}
@@ -516,19 +767,33 @@ line of research at the intersection of cognitive linguistics and
 information retrieval.
 The core contribution is not a claim of universal superiority, but a
 demonstration that image-schema metadata can be encoded, detected, and
-leveraged within a standard dense retrieval pipeline---producing
-measurable NDCG@5 gains for \textsc{Force}-schema queries in hybrid
-mode ($\Delta_\text{FORCE} = +0.210$) on a real Brazilian parliamentary
-corpus.
+leveraged as a proportional re-ranking signal within a standard dense
+retrieval pipeline---producing a mean NDCG@5 gain of $+0.091$ in
+text-boosting mode (10~queries, Brazilian parliamentary corpus,
+independent Opus annotator).
+A mode ablation (\S\ref{sec:ablation}) localises the IS-RAG
+contribution precisely: the multiplicative boost applied over
+text-embedding similarity is effective
+($\Delta_\text{text} = +0.091$), while cognitive embeddings used as
+search vectors degrade performance
+($\Delta_\text{hybrid} = -0.090$; $\Delta_\text{cognitive} = -0.192$).
+Crucially, this gain holds under independent annotation
+(Table~\ref{tab:annotator}), ruling out LLM echo as its source.
+A subsequent experiment with \texttt{BAAI/bge-m3}
+(\S\ref{sec:embedding}) reveals that the gain is embedding-dependent:
+with a state-of-the-art multilingual model the text-mode $\Delta$
+collapses to $\approx 0$, defining a utility frontier for explicit
+cognitive boosting.
 
-The asymmetric results across schema families are themselves a finding:
-they reveal that schema frequency in a corpus does not predict
-annotability, and that the relationship between cognitive structure and
-retrieval relevance is non-trivial and worth systematic investigation.
+The asymmetric results across schema families and modes are themselves
+findings: they reveal that schema frequency does not predict
+boostability, that \textsc{Path} deficits in hybrid mode are artefacts
+of noisy cognitive embeddings rather than schema properties, and that
+dual-embedding retrieval is not necessary for IS-RAG to work.
 IS-RAG establishes the proof of concept and the methodological
-scaffolding---dual embeddings, cognitive boosting, TREC-style
-schema-stratified evaluation---that future work in \emph{cognitive IR}
-can build upon.
+scaffolding---cognitive metadata indexing, proportional boosting,
+TREC-style schema-stratified evaluation---that future work in
+\emph{cognitive IR} can build upon.
 
 Immediate next steps include a schema$\times$domain crossed evaluation
 design, investigation of conventionalised schemas in graded-relevance
@@ -551,94 +816,14 @@ Code, corpus, and annotated ground truth are publicly available at
 \setcounter{section}{0}
 \renewcommand{\thesection}{\Alph{section}}
 
-\pagebreak
-\section{Cognitive Analysis Prompt}
-\label{app:prompt}
-
-The following prompt is shared between the indexing pipeline
-(\texttt{ingestion.py}) and the query-analysis step
-(\texttt{search.py}).
-It is written in \textbf{Portuguese} to match the language of the
-corpus and to preserve terminological precision in the few-shot
-examples.
-The placeholder \texttt{\{text\}} is replaced at runtime with the
-chunk or query text.
-
-\begin{lstlisting}
-Você é um linguista cognitivo especialista na Teoria da
-Metáfora Conceptual de Lakoff e nas Dinâmicas de Força de
-Talmy. Sua missão é analisar um texto em português extraído
-de discursos parlamentares, identificar os Esquemas
-Imagéticos dominantes e mapear como eles estruturam
-conceitos abstratos.
-
-Analise o texto seguindo rigorosamente esta taxonomia:
-
-1. MACROESQUEMAS E SUBTIPOS VÁLIDOS:
-- CONTAINER:
-  * INSIDE    (Estar contido, protegido, preso, engessado)
-  * OUTSIDE   (Estar fora, excluído, marginalizado)
-  * BOUNDARY  (Fronteiras, limites, barreiras de contenção)
-  * INTRUSION (Invasão, penetração forçada no recipiente)
-- PATH:
-  * SOURCE     (Ponto de partida, origem, base histórica)
-  * TRAJECTORY (Movimento, progresso, passos, rumo)
-  * GOAL       (Destino, objetivo final, chegada)
-  * DIVERSION  (Desvio de rota, perda de foco, sabotagem)
-- FORCE:
-  * BLOCKAGE     (Bloqueio completo, barreira física/legal)
-  * COMPULSION   (Força externa que empurra, obriga, coage)
-  * RESISTANCE   (Resistência interna, oposição ativa)
-  * COUNTER_FORCE(Duas forças colidindo, embate direto)
-
-2. REGRAS PARA target_domain_pt (lista fechada):
-"Economia" | "Política" | "Infraestrutura e Transportes"
-| "Segurança Pública" | "Justiça" | "Direitos Humanos e
-Cultura" | "Educação" | "Saúde" | "Meio Ambiente"
-| "Relações Internacionais" | "Outros"
-
-3. REGRA DE LITERALIDADE:
-Se o texto for puramente literal, descritivo, técnico ou
-administrativo, retorne listas vazias.
-
-EXEMPLOS (FEW-SHOT):
-
-Texto: "A oposição barrou os avanços da reforma tributária."
-Output:
-{"schemas": ["FORCE","PATH"], "details": [
-  {"schema_name":"FORCE","sub_type":"BLOCKAGE",
-   "anchor_word_pt":"barrou",
-   "target_domain_pt":"Política"},
-  {"schema_name":"PATH","sub_type":"TRAJECTORY",
-   "anchor_word_pt":"avanços",
-   "target_domain_pt":"Economia"}
-]}
-
-Texto: "A inflação empurrou as famílias para a crise."
-Output:
-{"schemas": ["FORCE"], "details": [
-  {"schema_name":"FORCE","sub_type":"COMPULSION",
-   "anchor_word_pt":"empurrou",
-   "target_domain_pt":"Economia"}
-]}
-
-Texto: "Quero saudar a presença do Vereador Júnior."
-Output: {"schemas": [], "details": []}
-
----
-Analise o texto a seguir e retorne o JSON estrito.
-
-Texto para análise:
-{text}
-\end{lstlisting}
-
 % =================================================================
+\pagebreak
 \section{IS-RAG Algorithms}
 \label{app:algorithms}
 
 \subsection{Indexing Pipeline}
 
-\begin{algorithm}[H]
+\begin{algorithm}[h]
 \caption{IS-RAG Indexing}\label{alg:index}
 \begin{algorithmic}[1]
 \Require Corpus $\mathcal{D}$, chunk size $w{=}150$,
@@ -648,7 +833,7 @@ Texto para análise:
   \State $C \gets \textsc{SemanticChunk}(d,\,w)$
   \Comment{sentence-boundary split}
   \State $\mathbf{E}_t \gets [\,\mathcal{E}(c) \mid c \in C\,]$
-  \Comment{text embeddings, 768d}
+  \Comment{text embeddings, $d$-dim (model-configurable)}
   \State $M \gets [\,\mathcal{P}(c) \mid c \in C\,]$
   \Comment{concurrent LLM calls, 5 workers}
   \For{$i \gets 1$ \textbf{to} $|C|$}
@@ -662,7 +847,7 @@ Texto para análise:
 
 \subsection{Query-Time Retrieval}
 
-\begin{algorithm}[H]
+\begin{algorithm}[h]
 \caption{IS-RAG Retrieval}\label{alg:retrieve}
 \begin{algorithmic}[1]
 \Require Query $q$, mode $m \in \{\text{text, cognitive, hybrid}\}$,
@@ -685,8 +870,13 @@ Texto para análise:
                        \;/\; \max(n,1)$
   \State $\delta \gets |\{d \in M_i.\text{details} \mid d.\text{domain} \in \Delta_q\}|
                        \;/\; \max(n,1)$
-  \State $\hat{s}_i \gets s \cdot (1 + \alpha\,\sigma + \beta\,\delta)$
-  \Comment{Eq.~\ref{eq:boosting}}
+  \If{$M_i.\text{schemas} \cap \Sigma_q \neq \emptyset$}
+    \State $\hat{s}_i \gets s \cdot (1 + \alpha\,\sigma + \beta\,\delta)$
+    \Comment{Eq.~\ref{eq:boosting}}
+  \Else
+    \State $\hat{s}_i \gets s$
+    \Comment{no schema match — no boost}
+  \EndIf
 \EndFor
 \State \Return $\textsc{TopK}(\{\hat{s}_i\},\,k)$
 \end{algorithmic}

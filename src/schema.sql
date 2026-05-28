@@ -1,13 +1,15 @@
 -- Ativar a extensão pgvector
 CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Dimensão deve corresponder ao modelo de embedding configurado em EMBEDDING_MODEL.
+-- BAAI/bge-m3 (padrão): 1024d  |  paraphrase-multilingual-mpnet-base-v2: 768d
 CREATE TABLE IF NOT EXISTS document_chunks (
-    id                  SERIAL      PRIMARY KEY,
-    content             TEXT        NOT NULL,
-    embedding           VECTOR(768) NOT NULL,
-    cognitive_embedding VECTOR(768),
-    cognitive_metadata  JSONB       NOT NULL DEFAULT '{}',
-    source_metadata     JSONB       NOT NULL DEFAULT '{}'
+    id                  SERIAL       PRIMARY KEY,
+    content             TEXT         NOT NULL,
+    embedding           VECTOR(1024) NOT NULL,
+    cognitive_embedding VECTOR(1024),
+    cognitive_metadata  JSONB        NOT NULL DEFAULT '{}',
+    source_metadata     JSONB        NOT NULL DEFAULT '{}'
 );
 
 -- Busca vetorial semântica (texto bruto)

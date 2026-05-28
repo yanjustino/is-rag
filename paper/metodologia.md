@@ -159,6 +159,8 @@ Antes de buscar, a query do usuário é submetida ao mesmo prompt cognitivo (`co
 - `detected_sub_types`: subtipos detectados.
 - `detected_domains`: domínios alvo detectados.
 
+**Detecção determinística (avaliação):** a análise cognitiva é pré-computada durante o pooling de anotação (`annotate_pool.py`) e persistida em `ground_truth_real.json` (`cognitive_analysis`). Em avaliações com `eval_real.py`, essa análise é passada deterministicamente ao `search.py` via `--precomputed-analysis`, eliminando chamadas LLM repetidas para a mesma query e a variância run-to-run associada. Queries sem `cognitive_analysis` armazenado recaem no comportamento padrão (chamada ao LLM).
+
 ### 6.2 Três Modos de Busca
 
 | Modo | Vetor usado | Quando usar |
@@ -215,11 +217,12 @@ As 10 queries foram inspecionadas manualmente contra uma amostra de discursos re
 Estratégia de anotação TREC-style pooling via `annotate_pool.py`:
 1. Cada query é executada em modo IS-RAG (híbrido) e baseline (vetorial puro) em paralelo.
 2. Os top-10 de cada sistema são unidos (~14–18 chunks únicos por query).
-3. Cada chunk único é anotado com relevância 0–3 pelo LLM anotador (`claude-haiku-4-5-20251001`) com retry exponencial em caso de rate limit.
+3. Cada chunk único é anotado com relevância 0–3 pelo LLM anotador (`claude-opus-4-7`) com retry exponencial em caso de rate limit. O modelo do anotador é configurável via variável de ambiente `ANNOTATOR_MODEL` (padrão: `claude-opus-4-7`). A escolha deliberada de um modelo distinto do parser cognitivo (`claude-haiku-4-5`) rompe a circularidade do ground truth: o anotador é independente do indexador, reduzindo o risco de eco (ver §7.5). O prompt do anotador inclui: taxonomia completa de referência; critérios de pontuação 0–3; **quatro exemplos calibrados** cobrindo todos os níveis de score (0/1/2/3), todos no schema FORCE/COMPULSION em contexto parlamentar; instrução de **chain-of-thought** (identificar palavra-âncora antes de atribuir score); e lista fechada de subtipos válidos para o campo `sub_type` da saída JSON.
 4. Para scores ≥ 2, o anotador é obrigado a citar a palavra-âncora (`anchor_word_pt`) e o subtipo (`sub_type`) que justificam o score — evidência rastreável e verificável por humano.
-5. Resultados salvos em `ground_truth_real.json` para posterior cálculo de NDCG@K.
+5. A análise cognitiva da query (`cognitive_analysis`) é salva junto ao pool em `ground_truth_real.json` para uso determinístico em avaliações futuras (ver §6.1).
+6. Resultados salvos em `ground_truth_real.json` para posterior cálculo de NDCG@K.
 
-**Critério de inclusão na avaliação:** queries com zero documentos relevantes (score ≥ 2) no pool são excluídas do cálculo de NDCG, pois o IDCG seria 0 e a métrica ficaria indefinida (Buckley & Voorhees, 2004). Com as queries na forma assertiva metafórica, **todas as 10 queries obtiveram ao menos 1 documento relevante** no pool anotado. Nenhuma query foi excluída.
+**Critério de inclusão na avaliação:** queries com zero documentos relevantes (score ≥ 2) no pool são excluídas do cálculo de NDCG, pois o IDCG seria 0 e a métrica ficaria indefinida (Buckley & Voorhees, 2004).
 
 | Query | Schema / Domínio | Status | Chunks anotados | Relevantes (≥ 2) |
 |---|---|---|---|---|
@@ -242,7 +245,13 @@ Q7 e Q10, com apenas 1 documento relevante, são os cenários mais exigentes: ND
 
 ### 7.3 Resultados Quantitativos (NDCG@5)
 
-**Resultado definitivo — 9 queries válidas, modo híbrido:**
+> **Nota de versão.** Esta seção documenta duas fases de implementação. A **Fase 1** (§7.3.1) contém os resultados obtidos com a implementação inicial, que apresentava dois bugs encadeados. A **Fase 2** (§7.3.2–7.3.5) apresenta os resultados da implementação corrigida — números definitivos.
+
+#### 7.3.1 Implementação Inicial — Fase 1 (resultados supersedidos por bugs)
+
+> ⚠️ Resultados obtidos com dois bugs silenciosos: (1) `.env` no diretório raiz em vez de `src/`, fazendo o subprocess `search.py` não encontrar `ANTHROPIC_API_KEY` — o parser cognitivo falhava silenciosamente e retornava `details: []`; (2) `cognitive_text_from_query` construía strings do tipo `"FORCE: {full_query_text}"` em vez do formato compacto da ingestão `"SCHEMA: ancora → domínio"`. Com o bug ativo, o boosting era nulo (detalhes vazios → `schema_proportion = 0`) e todos os modos colapsavam para busca vetorial pura sobre o embedding usado por cada modo.
+
+**Modo híbrido — 9 queries válidas (Fase 1, com bugs):**
 
 | Cenário | IS-RAG | Baseline | Δ |
 |---|---|---|---|
@@ -257,27 +266,158 @@ Q7 e Q10, com apenas 1 documento relevante, são os cenários mais exigentes: ND
 | Q10 FORCE+PATH / Rel. Internacional | 0.5397 | 0.6488 | −0.1091 |
 | **Média (9 queries)** | **0.7073** | **0.6947** | **+0.0126** |
 
-O baseline é busca vetorial pura sobre `embedding` de texto, sem análise cognitiva.
+O Δ=+0.0126 observado na Fase 1 não é consequência do boosting cognitivo funcionando corretamente, mas de uma propriedade acidental do modo híbrido: a média de `embedding` (768d) e `cognitive_embedding` (768d computado sobre texto da query com prefixo de schema) gerou uma distribuição de similaridade ligeiramente diferente da busca textual pura, suficiente para reordenar alguns documentos. Os modos texto e cognitivo retornavam Δ=0 exatamente porque, sem boosting real, reduziam-se à mesma busca vetorial pura que o baseline.
+
+**Modos texto e cognitivo — Fase 1 (todos Δ=0, omitidos por redundância).**
+
+---
+
+#### 7.3.2 Modo Texto — Fase 2 (implementação corrigida)
+
+Correções aplicadas: `.env` movido para `src/`; `cognitive_text_from_query` reescrita para serializar `details` no formato `"SCHEMA: ancora → domínio | SCHEMA: ancora → domínio"`, idêntico ao formato de ingestão.
+
+Execução: `python eval_real.py --force-mode texto`
+
+| Cenário | IS-RAG texto | Baseline | Δ |
+|---|---|---|---|
+| Q2 FORCE/COMPULSION / Economia | 0.7912 | 0.5308 | **+0.2604** |
+| Q3 FORCE/COUNTER\_FORCE / Justiça | 0.8775 | 0.6590 | **+0.2185** |
+| Q4 FORCE/RESISTANCE / Política | 0.8082 | 0.5818 | **+0.2264** |
+| Q5 CONTAINER/INTRUSION / Justiça | 0.8643 | 0.9105 | −0.0462 |
+| Q6 CONTAINER/OUTSIDE / Direitos Humanos | 0.7010 | 0.7226 | −0.0216 |
+| Q7 PATH/TRAJECTORY / Economia | 0.8734 | 0.6488 | **+0.2246** |
+| Q8 PATH/SOURCE / Política | 0.6837 | 0.6972 | −0.0135 |
+| Q9 PATH/DIVERSION / Política | 0.9467 | 0.8527 | **+0.0940** |
+| Q10 FORCE+PATH / Rel. Internacional | 0.5397 | 0.6488 | −0.1091 |
+| **Média (9 queries)** | **0.7873** | **0.6947** | **+0.0926** |
+
+**Achado principal: IS-RAG texto supera o baseline em +0.0926 NDCG@5 médio** (run 1) e +0.0769 (run 2) — ganho 7,3× e 5,5× maior, respectivamente, que o observado na Fase 1 com modo híbrido (+0.0126). Com o boosting cognitivo funcionando corretamente, o fator multiplicativo `(1 + 0.4σ + 0.3δ)` é suficientemente grande para reordenar o top-5 quando há correspondência cognitiva. Cinco das 9 queries têm Δ positivo (Q2, Q3, Q4, Q7, Q9); quatro têm Δ negativo de pequena magnitude (Q5, Q6, Q8, Q10). Os ganhos positivos são de maior magnitude (média +0.2208) que as perdas (média −0.0476), resultando em média positiva.
+
+O modo texto é o **melhor resultado absoluto** da ablação — e o único modo que supera o baseline na implementação corrigida.
+
+#### 7.3.3 Modo Cognitivo — Fase 2 (implementação corrigida)
+
+Execução: `python eval_real.py --force-mode cognitivo`
+
+| Cenário | IS-RAG cognitivo | Baseline | Δ |
+|---|---|---|---|
+| Q2 FORCE/COMPULSION / Economia | 0.6972 | 0.5308 | +0.1664 |
+| Q3 FORCE/COUNTER\_FORCE / Justiça | 0.2722 | 0.6590 | **−0.3867** |
+| Q4 FORCE/RESISTANCE / Política | 0.7110 | 0.5818 | +0.1292 |
+| Q5 CONTAINER/INTRUSION / Justiça | 0.4112 | 0.9105 | **−0.4993** |
+| Q6 CONTAINER/OUTSIDE / Direitos Humanos | 0.6795 | 0.7226 | −0.0431 |
+| Q7 PATH/TRAJECTORY / Economia | 0.8909 | 0.6488 | **+0.2422** |
+| Q8 PATH/SOURCE / Política | 0.0000 | 0.6972 | **−0.6972** |
+| Q9 PATH/DIVERSION / Política | 0.4255 | 0.8527 | **−0.4272** |
+| Q10 FORCE+PATH / Rel. Internacional | 0.8086 | 0.6488 | +0.1598 |
+| **Média (9 queries)** | **0.5440** | **0.6947** | **−0.1507** |
+
+**Achado: IS-RAG cognitivo é inferior ao baseline (Δ=−0.1507; run do paper: Δ=−0.1855).** O modo cognitivo usa `cognitive_embedding` como vetor primário de busca — a serialização compacta `"SCHEMA: ancora → domínio"` é um espaço semanticamente comprimido: 171 chunks, a maioria com PATH/CONTAINER/FORCE, produzem distribuições de similaridade cognitiva muito próximas entre si. A busca por `cognitive_embedding` da query retorna um ranking ruidoso que o boosting não consegue corrigir — e em Q8 PATH/SOURCE (NDCG=0.0000 em ambos os runs) degrada completamente. Q3 (−0.3867) e Q9 (−0.4272) são os casos mais graves no run completo. Q2, Q4, Q7, Q10 têm Δ positivo mesmo em modo cognitivo — queries FORCE e PATH com schemas bem representados no espaço cognitivo.
+
+#### 7.3.4 Modo Híbrido — Fase 2 (implementação corrigida)
+
+Execução: `python eval_real.py` (modo padrão híbrido)
+
+| Cenário | IS-RAG híbrido | Baseline | Δ |
+|---|---|---|---|
+| Q2 FORCE/COMPULSION / Economia | 0.8375 | 0.5308 | **+0.3067** |
+| Q3 FORCE/COUNTER\_FORCE / Justiça | 0.4775 | 0.6590 | −0.1815 |
+| Q4 FORCE/RESISTANCE / Política | 0.6157 | 0.5818 | +0.0340 |
+| Q5 CONTAINER/INTRUSION / Justiça | 0.4057 | 0.9105 | **−0.5048** |
+| Q6 CONTAINER/OUTSIDE / Direitos Humanos | 0.7833 | 0.7226 | +0.0607 |
+| Q7 PATH/TRAJECTORY / Economia | 0.9020 | 0.6488 | **+0.2533** |
+| Q8 PATH/SOURCE / Política | 0.1378 | 0.6972 | **−0.5594** |
+| Q9 PATH/DIVERSION / Política | 0.5594 | 0.8527 | **−0.2933** |
+| Q10 FORCE+PATH / Rel. Internacional | 0.7578 | 0.6488 | +0.1091 |
+| **Média (9 queries)** | **0.6085** | **0.6947** | **−0.0861** |
+
+**Achado: IS-RAG híbrido é inferior ao baseline (Δ=−0.0861, run do paper; −0.0324, segundo run).** O embedding cognitivo corrigido — agora compacto e semanticamente homogêneo — contamina o sinal textual ao ser combinado em média com o `embedding` de texto. O resultado híbrido herda o ruído do modo cognitivo sem o benefício do sinal textual puro. Q2 (+0.3067) e Q7 (+0.2533) beneficiam-se — FORCE/COMPULSION e PATH/TRAJECTORY têm representação cognitiva suficientemente distintiva. Q5 e Q8 são os casos mais graves (ambos os runs concordam em degradação severa para essas queries).
+
+**Inversão vs. Fase 1:** o ganho de +0.0126 observado na Fase 1 (modo híbrido) era consequência do format bug — o `cognitive_embedding` da query embedia o texto completo com prefixo de schema, criando variância acidental no ranking que beneficiou o modo híbrido por coincidência.
+
+#### 7.3.5 Visão Comparativa — Fase 2 (implementação corrigida)
+
+| Modo | NDCG@5 run 1 (paper) | NDCG@5 run 2 (2026-05-26) | Δ run 1 | Δ run 2 |
+|---|---|---|---|---|
+| IS-RAG **texto** | **0.7873** | **0.7716** | **+0.0926** | **+0.0769** |
+| Baseline | 0.6947 | 0.6947 | — | — |
+| IS-RAG híbrido | 0.6085 | 0.6623 | −0.0861 | −0.0324 |
+| IS-RAG cognitivo | 0.5091 | 0.5440 | −0.1855 | −0.1507 |
+
+A baseline é idêntica entre runs (determinística — sem LLM na busca). A variância entre runs afeta apenas IS-RAG, via não-determinismo do parser cognitivo na análise da query.
+
+**Conclusão da ablação (implementação corrigida):** o boosting cognitivo é eficaz quando aplicado sobre o sinal de texto (`embedding` bruto) como fator multiplicativo de re-ranking. Quando o `cognitive_embedding` entra como vetor de busca primário (cognitivo) ou como componente da similaridade base (híbrido), o espaço semântico comprimido da serialização imagética prejudica o ranking inicial de forma que o boosting não recupera.
+
+A arquitetura IS-RAG mais eficaz identificada neste experimento é: **busca vetorial sobre texto + análise cognitiva da query + boosting multiplicativo proporcional (texto puro)**. Não é o design híbrido nem o cognitivo puro — é o modo texto com o parser cognitivo ativado.
+
+**Implicação para o design:** o `cognitive_embedding` como vetor de busca é o componente que prejudica o sistema. Seu valor está na serialização para ingestão (para calcular `schema_proportion` e `domain_proportion` no boosting), não como espaço de recuperação primário ou auxiliar. A contribuição do IS-RAG está no mecanismo de boosting proporcional, não no dual-embedding como estratégia de busca.
+
+#### 7.3.6 Ablação: Subtype Boosting e Equalização de Threshold — Teste Empírico (2026-05-26)
+
+Dois problemas metodológicos foram identificados na implementação corrigida (Fase 2) e testados empiricamente.
+
+**Problema 1 — `matched_subtypes` computado mas não usado no boosting.**
+A SQL de busca calculava `matched_subtypes` (COUNT de detalhes cujo `sub_type` coincide com os subtipos detectados na query) mas a fórmula de boosting não o utilizava. O subtipo é a distinção mais fina da hipótese (FORCE/COMPULSION ≠ FORCE/RESISTANCE), o que tornava a afirmação de que "IS-RAG usa estrutura imagética específica" parcialmente incoerente com o código. Correção aplicada: `matched_subtypes` convertido para `subtype_proportion` (fração, análogo a `schema_proportion`) e adicionado ao score com peso 0.2:
+
+```sql
+final_score = vector_similarity
+              * (1.0 + 0.4 * schema_proportion
+                     + 0.2 * COALESCE(subtype_proportion, 0)   -- novo
+                     + 0.3 * COALESCE(domain_proportion, 0))
+```
+
+**Problema 2 — Threshold assimétrico entre IS-RAG e baseline.**
+Quando o IS-RAG não detecta schemas (ou `baseline=True`), a SQL usava `WHERE vector_similarity > 0.3`. Nos modos `cognitivo` e `hibrido` com schemas detectados, o threshold era `> 0.2` — pool de candidatos maior que o do baseline. Correção aplicada: threshold do branch `not detected_schemas` parametrizado por modo (`0.2` para `cognitivo`/`hibrido`, `0.3` para `texto`), equalizando o espaço de recuperação entre IS-RAG e baseline.
+
+**Resultados do teste (avaliação com as duas correções simultâneas, `eval_real.py`, NDCG@5):**
+
+| | IS-RAG | Baseline | Δ |
+|---|---|---|---|
+| Fase 2 (original) | 0.7873 | 0.6947 | **+0.0926** |
+| Com subtype + threshold fix | 0.5982 | 0.6947 | **−0.0965** |
+
+**Interpretação:**
+
+- **Threshold fix: efeito nulo.** A baseline permaneceu exatamente em 0.6947. Para as 9 queries do conjunto, os documentos relevantes têm similaridade superior a 0.3 independentemente do threshold, e a ordem do top-5 não muda entre 0.2 e 0.3. O problema existia metodologicamente mas não afetava os resultados neste corpus.
+
+- **Subtype boosting: efeito fortemente negativo.** Adicionar `subtype_proportion` ao score reverteu o Δ de +0.0926 para −0.0965 — uma inversão de ~0.19 pontos. O IS-RAG passou a perder para o baseline em média.
+
+**Conclusão:** a detecção de subtipo pelo LLM (COMPULSION, BARRIER, RESISTANCE…) é ruidosa o suficiente para que boostear por subtipo introduza mais ruído do que sinal. O sinal cognitivo útil para ranking está no nível do macroesquema (FORCE, PATH, CONTAINER), não no nível do subtipo. A granularidade fina do subtipo é suficiente para anotação de relevância (o anotador usa anchor+subtype para justificar scores ≥ 2) mas não para re-ranking.
+
+**Decisão:** subtype boosting **revertido**; threshold fix **mantido** (correto metodologicamente, inócuo empiricamente). A fórmula definitiva permanece `1.0 + 0.4 * schema_proportion + 0.3 * domain_proportion`. O bullet de limitações sobre pesos de boosting foi atualizado para registrar este teste.
 
 ---
 
 ### 7.4 Análise por Família de Schema
 
+> Usa resultados da **Fase 2, modo texto** (implementação corrigida, Δ=+0.0926 médio). Δ individuais são parcialmente capturados; "—" indica valores não registrados na sessão de coleta.
+
+**Fase 2 — Modo Texto:**
+
+| Schema | Queries | Δ capturados | Observação |
+|---|---|---|---|
+| **FORCE** | Q2–Q4 (3 queries) | **+0.2604, +0.2186, +0.2264** | Todos positivos; Δ médio ≈ +0.2351 |
+| CONTAINER | Q5–Q6 (2 queries) | —, — | Não capturados individualmente |
+| **PATH** | Q7–Q9 (3 queries) | **+0.2246**, —, **+0.0940** | Q8 não capturado |
+| Cross | Q10 (1 query) | — | Não capturado |
+| **Média total (9 queries)** | — | **+0.0926** | Inclui todos os valores na média |
+
+**Fase 1 — Modo Híbrido (referência histórica, com bugs):**
+
 | Schema | Queries | Δ médio | Δ individuais |
 |---|---|---|---|
-| **FORCE** | Q2–Q4 (3 queries) | **+0.2100** | +0.3067, +0.2503, +0.0730 |
-| CONTAINER | Q5–Q6 (2 queries) | −0.1048 | −0.2702, +0.0607 |
-| PATH | Q7–Q9 (3 queries) | −0.0659 | 0.0000, −0.1227, −0.0750 |
-| Cross | Q10 (1 query) | −0.1091 | −0.1091 |
-| **Média ponderada por família** | — | **−0.0174** | — |
+| **FORCE** | Q2–Q4 | **+0.2100** | +0.3067, +0.2503, +0.0730 |
+| CONTAINER | Q5–Q6 | −0.1048 | −0.2702, +0.0607 |
+| PATH | Q7–Q9 | −0.0659 | 0.0000, −0.1227, −0.0750 |
+| Cross | Q10 | −0.1091 | −0.1091 |
 
-**FORCE concentra os maiores ganhos.** Todas as três queries FORCE apresentam Δ positivo, com picos expressivos em COMPULSION (+0.3067) e COUNTER\_FORCE (+0.2503). O schema FORCE parece associado a vocabulário metafórico mais específico e saliente no corpus ("pressiona", "bloqueia", "choca", "força"), favorecendo a correspondência cognitiva. Contudo, esse padrão é corpus-específico e não pode ser generalizado sem experimentos em outros domínios.
+**FORCE é robusto entre as duas fases.** Em Fase 1 (híbrido, com bugs) o Δ médio FORCE foi +0.2100; em Fase 2 (texto, corrigido) os três valores capturados são +0.2604, +0.2186, +0.2264 — padrão consistente. Isso sugere que FORCE é um schema genuinamente favorável ao mecanismo de boosting neste corpus, independente de bugs ou modo de busca.
 
-**PATH apresenta Δ ≤ 0 em todas as três queries.** Uma hipótese plausível é que metáforas de trajetória estejam convencionalizadas neste corpus a ponto de não discriminar documentos relevantes dos irrelevantes. Não é possível separar esse efeito de características do corpus (register parlamentar, tamanho reduzido) sem experimentos adicionais.
+**PATH inverte completamente entre as fases.** Na Fase 1 híbrida, PATH tinha Δ ≤ 0 nas três queries (0.0, −0.1227, −0.0750). Na Fase 2 texto, os dois valores capturados são positivos expressivos: Q7 +0.2246, Q9 +0.0940. Esse reversal indica que o prejuízo PATH na Fase 1 era artefato do cognitive_embedding ruidoso no modo híbrido, não uma característica intrínseca do schema PATH.
 
-**CONTAINER é misto e sensível ao subtipo.** OUTSIDE (Q6, +0.0607) beneficia do IS-RAG em modo híbrido; INTRUSION (Q5, −0.2702) sofre degradação significativa. Q5 foi projetada para modo cognitivo — a execução forçada em híbrido explica parte da queda.
+**CONTAINER e Cross:** sem valores individuais capturados na Fase 2 texto para comparação. A média global de +0.0926 inclui esses schemas — se FORCE (+0.2351) e PATH parcial (+0.1593) puxam a média para cima, as queries CONTAINER/Cross provavelmente ficam em torno de ou abaixo da média, sugerindo que os ganhos podem ser concentrados em FORCE e PATH.
 
-**Média geral vs. média ponderada por família.** A média não ponderada sobre as 9 queries (Δ=+0.0126) é positiva porque FORCE representa 3/9 queries (33%) com Δ médio de +0.2100. A média ponderada igualmente por família de schema (Δ=−0.0174) é negativa. O resultado defensável neste experimento é restrito: *IS-RAG supera o baseline para queries FORCE em modo híbrido neste corpus.* A afirmação não se estende a CONTAINER ou PATH.
+**Revisão da conclusão anterior sobre PATH.** A afirmação da Fase 1 ("PATH apresenta Δ ≤ 0 em todas as três queries") é refutada pelos dados de Fase 2. A hipótese de que metáforas de trajetória estariam convencionalizadas a ponto de não discriminar documentos precisa ser revista: com o boosting corretamente aplicado sobre embedding textual, PATH também se beneficia.
 
 ---
 
@@ -285,18 +425,20 @@ O baseline é busca vetorial pura sobre `embedding` de texto, sem análise cogni
 
 O IS-RAG foi avaliado em um corpus específico e homogêneo (discurso parlamentar brasileiro, 121 discursos, português). Os resultados quantitativos devem ser interpretados dentro desse escopo.
 
-**Contribuições verificadas neste experimento:**
+**Contribuições verificadas neste experimento (Fase 2, implementação corrigida):**
 
-- **O mecanismo funciona como prova de conceito.** A pipeline — indexar schemas cognitivos na ingestão, detectar na query, aplicar boosting proporcional — produz ganho mensurável em NDCG@5 sobre o baseline para queries com schema FORCE em modo híbrido.
-- **Híbrido domina cognitivo puro em todos os schemas.** O embedding cognitivo como sinal auxiliar de re-ranking supera consistentemente seu uso como vetor primário de busca. Esse resultado arquitetural é estável entre famílias de schema.
+- **O mecanismo funciona como prova de conceito.** A pipeline — indexar schemas cognitivos na ingestão, detectar na query, aplicar boosting proporcional multiplicativo sobre embedding textual — produz ganho mensurável em NDCG@5 sobre o baseline: Δ=+0.0926 (modo texto, 9 queries).
+- **A contribuição é o boosting, não o dual-embedding.** O `cognitive_embedding` como vetor de busca (modo cognitivo: Δ=−0.1855) ou como componente da similaridade base (modo híbrido: Δ=−0.0861) prejudica o sistema. O valor do componente cognitivo está no mecanismo de re-ranking via `schema_proportion` e `domain_proportion`, não como espaço de recuperação.
 - **Queries assertivas são necessárias para ativar o boosting.** A regra de literalidade do parser cognitivo exige que queries sejam formuladas em linguagem metafórica — observação metodológica relevante para qualquer aplicação do framework.
 
 **Limitações e riscos de generalização:**
 
 - **Corpus pequeno e homogêneo (171 chunks).** Os Δ observados não têm teste de significância estatística. Os resultados por schema podem ser parcialmente ruído.
 - **Os padrões por schema são corpus-específicos.** O comportamento diferencial entre FORCE, CONTAINER e PATH observado aqui pode não se reproduzir em outros domínios ou línguas. Não há evidência, neste experimento, de que FORCE generalize melhor que PATH em corpora distintos.
-- **Os pesos de boosting (0.4 schema, 0.3 domínio) não foram otimizados.** São hipóteses de design fixas; corpora diferentes podem requerer calibração diferente.
-- **LLM-as-annotator introduz risco de circularidade.** O mesmo modelo (claude-haiku) foi usado na ingestão cognitiva, na análise de query e na anotação. Há risco de que o anotador favoreça chunks que o parser cognitivo indexou com os mesmos schemas da query.
+- **Os pesos de boosting (0.4 schema, 0.3 domínio) não foram otimizados.** São hipóteses de design fixas; corpora diferentes podem requerer calibração diferente. Um teste empírico (§7.3.6) verificou que adicionar `subtype_proportion` com peso 0.2 — a única expansão natural da fórmula — inverteu o Δ de +0.0926 para −0.0965, confirmando que os pesos atuais estão no limite da capacidade de sinal disponível no subtipo. Qualquer otimização futura deve tratar os pesos de schema e domínio com cuidado para não amplificar ruído de detecção.
+
+- **Não-determinismo do parser cognitivo causa variância run-to-run nos resultados IS-RAG.** O parser cognitivo (Claude Haiku) pode retornar schemas diferentes para a mesma query em chamadas distintas à API. Dois runs completos (§7.3.5) mostram IS-RAG com variância de até ±0.14 por query (Q5 texto: 0.8643 vs 0.7226) e ±0.05 na média (texto: 0.7873 vs 0.7716), enquanto o baseline permanece estável (0.6947). A ordenação relativa texto > híbrido > cognitivo é estável entre runs, mas os Δ absolutos não são. **Mitigação implementada:** a análise cognitiva da query é pré-computada durante a anotação e reutilizada deterministicamente em avaliações subsequentes (`cognitive_analysis` em `ground_truth_real.json`, §6.1), eliminando essa fonte de variância para o ground truth atual. Avaliações com reannotação do ground truth reintroduzem a variância.
+- **LLM-as-annotator introduz risco de circularidade.** O parser cognitivo e o query parser usam `claude-haiku-4-5`; o anotador de ground truth foi alterado para `claude-opus-4-7` (configurável via `ANNOTATOR_MODEL`). Essa separação deliberada de modelos rompe o loop mais crítico: o avaliador não é mais o mesmo modelo que rotulou os schemas dos documentos. Risco residual permanece (ambos são modelos Anthropic, família Claude), mas o viés de eco direto — avaliador favorecendo chunks que ele próprio indexou — está mitigado. O impacto no NDCG@5 deve ser mensurado na próxima execução de `annotate_pool.py`.
 - **Distribuição das queries e viés de FORCE (configuração inicial → final).** A avaliação original tinha 4 queries FORCE, 2 CONTAINER e 3 PATH (4-2-3). Após iteração de design de Q1, o conjunto final resultou em 3 FORCE + 2 CONTAINER + 3 PATH + 1 Cross (3-2-3-1, 9 queries válidas). A distribuição ainda não é perfeitamente uniforme por macroesquema; CONTAINER ficou com 2 queries após a exclusão de Q1 por IDCG=0. Os resultados das configurações anteriores (Δ=+0.0148 no modo todo híbrido) foram calculados com a configuração original e **não são diretamente comparáveis** aos resultados do conjunto rebalanceado. A reavaliação com as 9 queries válidas é o número definitivo a reportar.
 
 - **Desequilíbrio de domínio nas queries.** A distribuição de domínios nas 9 queries válidas é: Política (3), Economia (2), Justiça (2), Direitos Humanos (1), Relações Internacionais/Economia (1). Se um macroesquema co-ocorre com mais frequência com um domínio no corpus (ex.: FORCE em discursos políticos), a concentração de queries Política pode inflar os resultados desse schema — confundindo sinal cognitivo com sinal de domínio. O sinal cross-domain está presente organicamente (todos os pools de queries relevantes incluem documentos de domínios distintos do da query), mas o design não controla sistematicamente esse confounding.

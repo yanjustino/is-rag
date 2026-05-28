@@ -35,16 +35,21 @@ try:
 except ImportError:
     pass
 
-from src.search import metaphorical_search
+import sys, os
+
+sys.path.insert(0, os.path.dirname(__file__))
+from search import metaphorical_search
 
 # ---------------------------------------------------------------------------
 # Anotador LLM
 # ---------------------------------------------------------------------------
-_ANNOTATOR_MODEL = os.getenv("ANNOTATOR_MODEL", "claude-haiku-4-5-20251001")
+_ANNOTATOR_MODEL = os.getenv("ANNOTATOR_MODEL", "claude-opus-4-7")
 _annotator_client = anthropic.Anthropic()
 
-_TAXONOMY = (Path(__file__).parent / "prompts" / "cognitive_analysis.md").read_text(
-    encoding="utf-8"
+_VALID_SUB_TYPES = (
+    "INSIDE, OUTSIDE, BOUNDARY, INTRUSION, "
+    "SOURCE, TRAJECTORY, GOAL, DIVERSION, "
+    "BLOCKAGE, COMPULSION, RESISTANCE, COUNTER_FORCE"
 )
 
 _ANNOTATOR_PROMPT = """\
@@ -56,7 +61,41 @@ Sua tarefa: dado um TRECHO de discurso parlamentar e uma QUERY com schema \
 esperado, atribuir uma nota de relevância de 0 a 3.
 
 === TAXONOMIA DE REFERÊNCIA ===
-{taxonomy}
+Analise o texto seguindo rigorosamente esta taxonomia estrita:
+
+1. MACROESQUEMAS E SUBTIPOS VÁLIDOS (Mantenha as chaves em MAIÚSCULAS e em inglês):
+- CONTAINER:
+  * INSIDE (Estar contido, protegido, preso, engessado)
+  * OUTSIDE (Estar fora, excluído, marginalizado)
+  * BOUNDARY (Fronteiras, limites, barreiras de contenção)
+  * INTRUSION (Invasão, penetração forçada no recipiente)
+- PATH:
+  * SOURCE (Ponto de partida, origem, base histórica)
+  * TRAJECTORY (Movimento, progresso, passos, rumo, avanço)
+  * GOAL (Destino, objetivo final, chegada, conclusão)
+  * DIVERSION (Desvio de rota, perda de foco, sabotagem do processo)
+- FORCE:
+  * BLOCKAGE (Bloqueio completo, barreira física/legal, trancar pauta, barrar)
+  * COMPULSION (Força externa que empurra, obriga ou coage a agir)
+  * RESISTANCE (Resistência interna, oposição ativa ou estancamento de uma força)
+  * COUNTER_FORCE (Duas forças colidindo de frente, embate direto, enfrentamento)
+
+2. REGRAS PARA O DOMÍNIO ALVO (target_domain_pt):
+O domínio alvo deve ser a categoria macro do assunto abstrato que está sendo estruturado pela metáfora física. Use OBRIGATORIAMENTE um destes termos padronizados:
+- "Economia" (Inflação, Imposto de Renda, arcabouço fiscal, juros, tributação)
+- "Política" (Disputas partidárias, eleições, cassação de mandato, anistia, obstrução, oposição)
+- "Infraestrutura e Transportes" (Rodovias, portos, asfalto, indústria naval, energia, pontes, aeroportos)
+- "Segurança Pública" (Crime organizado, facções, milícias, policiamento, penas, armamento)
+- "Justiça" (Decisões do STF, processos judiciais, constitucionalidade, cumprimento de leis, foro)
+- "Direitos Humanos e Cultura" (Racismo, pautas indígenas/quilombolas, feminicídio, manifestações culturais, minorias, mulheres)
+- "Educação" (Universidades, escolas, institutos federais, professores, financiamento, Pé-de-Meia)
+- "Saúde" (SUS, hospitais, médicos peritos, climatério, planos de saúde, doenças)
+- "Meio Ambiente" (Crise climática, COP 30, desmatamento, transição energética, sustentabilidade)
+- "Relações Internacionais" (Diplomacia, comércio exterior, tratados, geopolítica, tarifas alfandegárias, Trump/EUA)
+- "Outros" (Casos excepcionais que fujam completamente do escopo político, como pêsames, homenagens fúnebres ou saudações protocolares)
+
+3. REGRA DE LITERALIDADE:
+Se o texto for puramente literal, descritivo, técnico, administrativo ou não contiver nenhuma metáfora conceitual baseada nos esquemas acima, retorne as listas de esquemas e detalhes completamente vazias. Não force classificações em textos literais.
 
 === CRITÉRIOS DE PONTUAÇÃO ===
 
@@ -82,6 +121,28 @@ REGRA CRÍTICA: Para atribuir score ≥ 2 você DEVE identificar a palavra-ânco
 e o subtipo. Se não conseguir apontar evidência textual concreta, o score
 máximo é 1. Não force schemas em textos literais.
 
+=== EXEMPLOS CALIBRADOS (Schema: FORCE/COMPULSION | Domínio: Economia) ===
+
+— Score 0 —
+Trecho: "Parabenizo o Sr. Presidente e agradeço aos nobres colegas pela presença nesta sessão solene."
+Raciocínio: Texto protocolar, sem relação com economia nem com qualquer schema de força.
+{{"relevance": 0, "anchor_word": null, "sub_type": null, "justification": "Saudação protocolar sem conteúdo temático ou esquemático relevante."}}
+
+— Score 1 —
+Trecho: "O índice de inflação acumulado nos últimos doze meses atingiu 4,83%, conforme divulgado pelo IBGE na última semana."
+Raciocínio: Trata do tema econômico mas é puramente factual — nenhuma força age sobre ninguém, nenhuma metáfora conceitual estrutura o argumento.
+{{"relevance": 1, "anchor_word": null, "sub_type": null, "justification": "Dado factual sobre inflação sem uso de schema imagético de força."}}
+
+— Score 2 —
+Trecho: "A crise fiscal obriga os estados a cortarem investimentos em infraestrutura e serviços essenciais à população."
+Raciocínio: Âncora "obriga" evidencia FORCE/COMPULSION — uma força externa coage os estados a agir. Schema presente, mas não domina toda a argumentação.
+{{"relevance": 2, "anchor_word": "obriga", "sub_type": "COMPULSION", "justification": "Âncora 'obriga' evidencia força coercitiva da crise fiscal sobre os estados."}}
+
+— Score 3 —
+Trecho: "Os juros abusivos sufocam e empurram os pequenos empresários para a falência, compelindo-os a demitir seus funcionários e encerrar as atividades."
+Raciocínio: Âncoras "sufocam", "empurram" e "compelindo" evidenciam FORCE/COMPULSION de forma central — o schema estrutura todo o argumento, no domínio econômico exato da query.
+{{"relevance": 3, "anchor_word": "empurram", "sub_type": "COMPULSION", "justification": "Schema FORCE/COMPULSION é central: juros como força que empurra empresários à falência no domínio Economia."}}
+
 === INPUT ===
 
 Query    : "{query_text}"
@@ -93,25 +154,28 @@ Trecho:
 
 === OUTPUT ===
 
-Retorne apenas o JSON a seguir (sem markdown, sem texto adicional):
-{{"relevance": <0|1|2|3>, "anchor_word": "<palavra-âncora ou null>", "sub_type": "<subtipo ou null>", "justification": "<uma frase explicando a nota>"}}
+Primeiro, em uma linha, identifique: qual palavra-âncora você encontra no trecho e qual subtipo válido ela evidencia?
+Subtipos válidos: {valid_sub_types}
+
+Depois retorne apenas o JSON (sem markdown):
+{{"relevance": <0|1|2|3>, "anchor_word": "<palavra-âncora ou null>", "sub_type": "<subtipo válido ou null>", "justification": "<uma frase explicando a nota>"}}
 """
 
 
 def _llm_score(query: dict, item: dict, max_retries: int = 5) -> tuple[int, str]:
     """Chama o LLM anotador com retry exponencial em caso de rate limit (429)."""
     prompt = _ANNOTATOR_PROMPT.format(
-        taxonomy=_TAXONOMY,
         query_text=query["text"],
         schema=query["schema"],
         domain=query["domain"],
         content=item["content"],
+        valid_sub_types=_VALID_SUB_TYPES,
     )
     for attempt in range(max_retries):
         try:
             msg = _annotator_client.messages.create(
                 model=_ANNOTATOR_MODEL,
-                max_tokens=192,
+                max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
             output = msg.content[0].text.strip()
@@ -127,7 +191,7 @@ def _llm_score(query: dict, item: dict, max_retries: int = 5) -> tuple[int, str]
             )
         except anthropic.RateLimitError:
             if attempt == max_retries - 1:
-                return 0, "rate limit esgotado"
+                return 0, "rate limit esgotado", None, None
             wait = (2**attempt) + random.uniform(0, 1)
             print(
                 f"\n    [429] rate limit — aguardando {wait:.1f}s (tentativa {attempt + 1}/{max_retries})...",
@@ -312,8 +376,8 @@ def save_state(state: dict):
     )
 
 
-def build_pool(query: dict, dry_run: bool = False) -> list[dict]:
-    """Roda IS-RAG e baseline em paralelo, retorna lista deduplicada de chunks anotáveis."""
+def build_pool(query: dict, dry_run: bool = False) -> tuple[list[dict], dict]:
+    """Roda IS-RAG e baseline em paralelo, retorna (pool, cognitive_analysis)."""
     print("\n  [IS-RAG + Baseline] buscando em paralelo...", end=" ", flush=True)
     with ThreadPoolExecutor(max_workers=2) as ex:
         f_israg = ex.submit(
@@ -325,6 +389,13 @@ def build_pool(query: dict, dry_run: bool = False) -> list[dict]:
         israg_report = f_israg.result()
         base_report = f_base.result()
     print("ok")
+
+    cognitive_analysis = {
+        "schemas": israg_report.get("detected_schemas", []),
+        "sub_types": israg_report.get("detected_sub_types", []),
+        "domains": israg_report.get("detected_domains", []),
+        "details": israg_report.get("detected_details", []),
+    }
 
     israg_ids = {r["chunk_id"] for r in israg_report.get("results", [])}
     base_ids = {r["chunk_id"] for r in base_report.get("results", [])}
@@ -384,7 +455,7 @@ def build_pool(query: dict, dry_run: bool = False) -> list[dict]:
                 f"schemas={item['cognitive_schemas']}"
             )
 
-    return pool
+    return pool, cognitive_analysis
 
 
 def annotate_pool(query: dict, pool: list[dict], already_annotated: dict) -> list[dict]:
@@ -510,9 +581,10 @@ def main():
 
         if existing.get("pool") and not dry_run:
             pool = existing["pool"]
+            cognitive_analysis = existing.get("cognitive_analysis")
             print(f"  Pool existente com {len(pool)} chunks.")
         else:
-            pool = build_pool(query, dry_run=dry_run)
+            pool, cognitive_analysis = build_pool(query, dry_run=dry_run)
 
         if dry_run:
             continue
@@ -530,6 +602,7 @@ def main():
             "domain": query["domain"],
             "mode": query["mode"],
             "text": query["text"],
+            "cognitive_analysis": cognitive_analysis,
             "pool": pool,
         }
         save_state(state)

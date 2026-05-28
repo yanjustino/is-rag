@@ -16,7 +16,6 @@ import argparse
 import json
 import math
 import os
-import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -27,9 +26,13 @@ try:
 except ImportError:
     pass
 
-BASE_DIR     = Path(__file__).parent
-DEFAULT_GT   = BASE_DIR / "data" / "ground_truth_real.json"
+BASE_DIR      = Path(__file__).parent
+DEFAULT_GT    = BASE_DIR / "data" / "ground_truth_real.json"
 DEFAULT_TABLE = "document_chunks"
+
+# Importa search diretamente — modelo carrega uma única vez aqui.
+sys.path.insert(0, str(BASE_DIR))
+from search import metaphorical_search
 
 
 # ---------------------------------------------------------------------------
@@ -76,13 +79,14 @@ def load_ground_truth(path: Path) -> list[dict]:
             continue
 
         scenarios.append({
-            "id":           q["id"],
-            "name":         f"Q{q['id']:>2} — {q['schema']} / {q['domain']}",
-            "schema":       q["schema"],
-            "domain":       q["domain"],
-            "mode":         q["mode"],
-            "text":         q["text"],
-            "relevance_map": rel_map,
+            "id":                q["id"],
+            "name":              f"Q{q['id']:>2} — {q['schema']} / {q['domain']}",
+            "schema":            q["schema"],
+            "domain":            q["domain"],
+            "mode":              q["mode"],
+            "text":              q["text"],
+            "relevance_map":     rel_map,
+            "cognitive_analysis": q.get("cognitive_analysis"),
         })
 
     if excluded:
@@ -95,7 +99,7 @@ def load_ground_truth(path: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Busca via subprocess (mantém IS_RAG_TABLE isolado por chamada)
+# Busca via import direto (modelo carregado uma vez, sem overhead de subprocess)
 # ---------------------------------------------------------------------------
 
 def run_search(
@@ -104,20 +108,16 @@ def run_search(
     top_k: int,
     table: str,
     baseline: bool = False,
+    precomputed_analysis: dict = None,
 ) -> dict:
-    env = os.environ.copy()
-    env["IS_RAG_TABLE"] = table
-    cmd = [sys.executable, "search.py", query_text, "--mode", mode, "--top", str(top_k), "--json"]
-    if baseline:
-        cmd.append("--baseline")
-    result = subprocess.run(
-        cmd, cwd=BASE_DIR, env=env, text=True, capture_output=True, timeout=120
+    return metaphorical_search(
+        query_text=query_text,
+        top_k=top_k,
+        mode=mode,
+        verbose=False,
+        baseline=baseline,
+        precomputed_analysis=precomputed_analysis,
     )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"search.py falhou:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-    return json.loads(result.stdout)
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ def evaluate_all(
         for sc in scenarios:
             sid = sc["id"]
             results_raw[sid] = {}
-            futures[ex.submit(run_search, sc["text"], sc["mode"], top_k, table, False)] = (sid, False)
+            futures[ex.submit(run_search, sc["text"], sc["mode"], top_k, table, False, sc.get("cognitive_analysis"))] = (sid, False)
             futures[ex.submit(run_search, sc["text"], sc["mode"], top_k, table, True)]  = (sid, True)
 
         done = 0

@@ -35,8 +35,41 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 docker compose up -d          # PostgreSQL 16 + pgvector on port 5433
 psql "host=localhost port=5433 dbname=is_rag_db user=is_rag_user password=is_rag_password" \
-  -f schema.sql
+  -f src/schema.sql
 ```
+
+### Embedding model
+
+IS-RAG supports two embedding models selectable via the `EMBEDDING_MODEL` environment variable:
+
+| Model | Dimensions | Notes |
+|---|---|---|
+| `BAAI/bge-m3` *(default)* | 1024d | SOTA multilingual; used in the embedding robustness experiment |
+| `paraphrase-multilingual-mpnet-base-v2` | 768d | Lighter; used for the main paper results |
+
+Add the chosen model to your `.env` file (or omit to use the default):
+
+```bash
+# .env
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional — defaults to BAAI/bge-m3 if omitted
+EMBEDDING_MODEL=paraphrase-multilingual-mpnet-base-v2
+```
+
+> **⚠️ Switching models requires recreating the database.**
+> The vector column dimension (`VECTOR(1024)` vs `VECTOR(768)`) is fixed at table creation time.
+> If you change `EMBEDDING_MODEL` after ingesting data, drop and recreate the table before re-ingesting:
+>
+> ```bash
+> psql "host=localhost port=5433 dbname=is_rag_db user=is_rag_user password=is_rag_password" \
+>   -c "DROP TABLE IF EXISTS document_chunks;"
+> psql "host=localhost port=5433 dbname=is_rag_db user=is_rag_user password=is_rag_password" \
+>   -f src/schema.sql
+> ```
+>
+> The default `src/schema.sql` declares `VECTOR(1024)` (bge-m3).
+> To use mpnet, edit the two `VECTOR(1024)` occurrences to `VECTOR(768)` before running the DDL.
 
 ---
 
@@ -79,21 +112,14 @@ python search.py "query text" --baseline        # dense retrieval without boosti
 
 ### 4 — Evaluation (NDCG@5)
 
-The annotated ground truth (`src/data/ground_truth_real.json`, 9 valid queries) is included.
+The annotated ground truth (`src/data/ground_truth_real.json`, 10 valid queries) is included.
 
 ```bash
 cd src
-python eval_real.py               # IS-RAG vs. baseline, NDCG@5, all 9 queries
+python eval_real.py               # IS-RAG vs. baseline, NDCG@5, all 10 queries
 python eval_real.py --top-k 10    # NDCG@10
 python eval_real.py --workers 8   # increase parallelism
 ```
-
-Expected output (hybrid mode, NDCG@5):
-
-| System   | Mean NDCG@5 | Δ      |
-|----------|-------------|--------|
-| IS-RAG   | 0.7073      | +0.013 |
-| Baseline | 0.6947      | —      |
 
 ### 5 — Robustness
 
@@ -111,7 +137,7 @@ python robust_eval.py --query-id 3 --json-out report.json
 src/
   data/
     corpus_camara_piloto.jsonl  # 121 speeches, 13 parties (2025)
-    ground_truth_real.json      # 9 annotated queries (TREC-style pool, 0–3 relevance)
+    ground_truth_real.json      # 10 annotated queries (TREC-style pool, 0–3 relevance)
   coletor.py          # Chamber of Deputies API collector
   collect_corpus.py   # multi-party batch collection
   ingestion.py        # chunking → dual embeddings → PostgreSQL
@@ -124,7 +150,7 @@ paper/
   main.tex            # arXiv preprint (English)
   main-ptbr.tex       # preprint (Portuguese)
   references.bib
-schema.sql            # PostgreSQL DDL (document_chunks table + HNSW/GIN indexes)
+src/schema.sql        # PostgreSQL DDL (document_chunks table + HNSW/GIN indexes)
 docker-compose.yml    # PostgreSQL 16 + pgvector
 ```
 
@@ -134,8 +160,8 @@ docker-compose.yml    # PostgreSQL 16 + pgvector
 
 | Component | Choice | Rationale |
 |---|---|---|
-| Embedding model | `paraphrase-multilingual-mpnet-base-v2` (local) | Reproducible without API; validated Portuguese coverage |
+| Embedding model | Configurable via `EMBEDDING_MODEL` (default: `BAAI/bge-m3`, 1024d; paper results: `paraphrase-multilingual-mpnet-base-v2`, 768d) | Local, reproducible; no API required |
 | Cognitive Parser | `claude-haiku-4-5` | Fast, low-cost; shared prompt for indexing and query analysis |
-| Boosting formula | $\hat{s} = s \cdot (1 + 0.4\,\sigma + 0.3\,\delta)$ | Schema match primary signal; domain match secondary |
+| Boosting formula | $\hat{s} = s \cdot (1 + 0.4\,\sigma + 0.3\,\delta)$ applied only when $M_i.\text{schemas} \cap \Sigma_q \neq \emptyset$ | Schema match primary signal; domain match secondary; no boost when no match |
 | Vector store | PostgreSQL 16 + pgvector (HNSW) | Single dependency; GIN indexes for JSONB metadata filtering |
 | Evaluation | TREC-style pooling + NDCG@5 | Handles graded relevance; standard IR benchmark protocol |

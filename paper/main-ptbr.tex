@@ -99,12 +99,10 @@
 
   \vspace{0.8em}
 
-  % TODO: preencher com os nomes dos autores
   {\normalsize
-    Autor Um$^1$ \quad Autor Dois$^1$ \quad Autor Três$^2$ \\[4pt]
-    $^1$ Instituição Um \quad $^2$ Instituição Dois \\[4pt]
-    \texttt{\{autor1,autor2\}@inst1.edu} \quad
-    \texttt{autor3@inst2.edu}
+    Yan Justino$^{1,2}$ \\[4pt]
+    $^1$ CESAR School \quad $^2$ Itaú Unibanco \\[4pt]
+    \texttt{contact@yanjustino.com}
   }
 
   \vspace{0.6em}
@@ -135,23 +133,33 @@ abstrata além da sobreposição lexical.
 
 \textbf{Avaliação.}
 Construímos um ground truth estilo TREC sobre 121 discursos
-parlamentares brasileiros (171 trechos), com 9 consultas válidas
-(3~\textsc{Force} $+$ 2~\textsc{Container} $+$ 3~\textsc{Path} $+$
-1~cross-schema) anotadas por LLM em escala 0--3.
+parlamentares brasileiros (171 trechos), com 10 consultas válidas
+(3~\textsc{Force} $+$ 3~\textsc{Container} $+$ 3~\textsc{Path} $+$
+1~cross-schema) anotadas por LLM independente (\texttt{claude-opus-4-7},
+distinto do Analisador Cognitivo) em escala 0--3.
 A métrica principal é NDCG@5; a linha de base é recuperação densa sem
 boosting cognitivo.
 
 \textbf{Achados.}
-O IS-RAG atinge NDCG@5 médio de 0,7073 contra 0,6947 da linha de base
-($\Delta = +0{,}013$).
-Os ganhos concentram-se nas consultas \textsc{Force}
-($\Delta_\text{FORCE} = +0{,}210$); \textsc{Container} e \textsc{Path}
-apresentam resultados neutros ou negativos
-($\Delta_\text{família} = -0{,}017$).
-Dois achados metodológicos emergem: (1)~consultas devem ser formuladas
-como \emph{afirmações metafóricas assertivas} para ativar o componente
-cognitivo; (2)~frequência de esquema no corpus não prediz anotabilidade
-— esquemas convencionalizados resistem ao julgamento de relevância.
+Uma ablação sobre três modos de recuperação revela que o
+\emph{boosting no modo texto} — boost cognitivo proporcional aplicado
+sobre similaridade textual — é a configuração mais eficaz, atingindo
+NDCG@5 médio de 0,7793 contra 0,6881 da linha de base
+($\Delta = +0{,}091$).
+Usar o embedding cognitivo como vetor de busca primário degrada o
+desempenho ($\Delta_\text{cognitivo} = -0{,}192$;
+$\Delta_\text{híbrido} = -0{,}090$), localizando a contribuição do
+IS-RAG no mecanismo de boosting, e não na recuperação dual.
+Consultas \textsc{Force} beneficiam-se de forma mais consistente
+($\Delta_\text{FORCE} = +0{,}267$); \textsc{Path} é positivo em todas
+as três consultas ($\Delta_\text{PATH} = +0{,}085$);
+\textsc{Container} apresenta efeito médio próximo de zero
+($\Delta_\text{CONT} = -0{,}017$).
+Dois achados metodológicos adicionais emergem: (1)~consultas devem ser
+formuladas como \emph{afirmações metafóricas assertivas} para ativar o
+componente cognitivo; (2)~frequência de esquema no corpus não prediz
+\emph{boostabilidade} — esquemas convencionalizados não carregam sinal
+discriminativo de re-ranking.
 \end{abstract}
 
 \noindent\textbf{Palavras-chave:} geração aumentada por recuperação $\cdot$ esquemas imagéticos $\cdot$ linguística cognitiva $\cdot$ recuperação de informação $\cdot$ processamento de linguagem natural $\cdot$ detecção de metáfora $\cdot$ recuperação densa $\cdot$ discurso político $\cdot$ busca semântica $\cdot$ cognição corporificada
@@ -193,11 +201,11 @@ profunda que complementa a busca semântica densa.
         (texto e cognitivo) e aplica boosting cognitivo proporcional
         em tempo de recuperação (\S\ref{sec:method}).
   \item Construímos um ground truth estilo TREC sobre um corpus real de
-        discursos parlamentares brasileiros (171 trechos, 9 consultas
+        discursos parlamentares brasileiros (171 trechos, 10 consultas
         válidas, LLM como anotador) e reportamos NDCG@5 (\S\ref{sec:eval}).
   \item Identificamos restrições metodológicas para avaliação de
         recuperação ciente de esquemas: formulação assertiva de consultas,
-        frequência vs.\ anotabilidade de esquemas e risco de circularidade
+        frequência vs.\ boostabilidade de esquemas e risco de circularidade
         com LLM (\S\ref{sec:discussion}).
 \end{itemize}
 
@@ -312,7 +320,7 @@ investigação — o próprio sinal de boosting cognitivo.
 
 O Analisador Cognitivo envia cada trecho para o
 \texttt{claude-haiku-4-5} \citep{anthropic2024} usando um prompt
-compartilhado (Apêndice~\ref{app:prompt}) e extrai JSON estruturado
+compartilhado (disponível em \url{https://github.com/yanjustino/is-rag}) e extrai JSON estruturado
 validado por um schema Pydantic.
 A taxonomia segue \citet{lakoff1980} e \citet{talmy1988}:
 
@@ -339,11 +347,28 @@ O corpus apresenta 92~ocorrências de \textsc{Path}, 88~de
 \subsection{Busca Híbrida e Boosting Cognitivo}
 \label{sec:boosting}
 
-O IS-RAG suporta três modos de recuperação: \emph{texto} (apenas
-embedding textual), \emph{cognitivo} (apenas embedding cognitivo) e
-\emph{híbrido} (média de ambas as similaridades).
-Após computar a similaridade vetorial base~$s$, aplica-se um
-\emph{boost cognitivo proporcional}:
+O IS-RAG suporta três modos de recuperação.
+Em todos os três, o Analisador Cognitivo executa sobre a consulta em
+tempo de recuperação para detectar esquemas ($\Sigma_q$) e domínios
+alvo ($\Delta_q$).
+Os modos diferem apenas na forma como a similaridade base~$s$ é
+computada antes do boost:
+
+\begin{itemize}[noitemsep,topsep=2pt]
+  \item \textbf{Texto:} $s = \cos(\mathbf{e}_{q,t},\,\mathbf{e}_{t,i})$
+        — o embedding textual da consulta é comparado contra os
+        embeddings textuais dos trechos.
+        A informação cognitiva contribui apenas via boost.
+  \item \textbf{Cognitivo:} $s = \cos(\mathbf{e}_{q,c},\,\mathbf{e}_{c,i})$
+        — a saída do Analisador Cognitivo para a consulta é serializada
+        no mesmo formato \texttt{schema\,$\to$\,domínio} da indexação,
+        embutida e comparada contra os embeddings cognitivos dos trechos.
+  \item \textbf{Híbrido:} $s = \bigl(s_t + s_c\bigr)/2$
+        — média aritmética das similaridades textual e cognitiva.
+\end{itemize}
+
+Após computar~$s$, o mesmo \emph{boost cognitivo proporcional} é
+aplicado nos três modos:
 
 \begin{equation}
   \label{eq:boosting}
@@ -351,13 +376,14 @@ Após computar a similaridade vetorial base~$s$, aplica-se um
 \end{equation}
 
 \noindent onde $\sigma$ é a fração dos detalhes cognitivos de um trecho
-cujo \texttt{schema\_name} corresponde a um esquema detectado na
-consulta, e $\delta$ é a fração análoga para \texttt{target\_domain}.
+cujo \texttt{schema\_name} corresponde a um esquema em~$\Sigma_q$,
+e $\delta$ é a fração análoga para \texttt{target\_domain}
+em relação a~$\Delta_q$.
 Os pesos ($\alpha{=}0{,}4$, $\beta{=}0{,}3$) foram definidos por
 design; a estrutura esquemática é o sinal primário e o domínio é o
 reforço secundário.
-A linha de base desativa o Analisador Cognitivo e aplica recuperação
-puramente por embedding textual sem boosting.
+A linha de base desativa o Analisador Cognitivo inteiramente e aplica
+recuperação puramente por embedding textual sem boosting.
 
 % =================================================================
 \section{Configuração da Avaliação}
@@ -368,16 +394,15 @@ Construímos um ground truth por pooling estilo TREC \citep{voorhees2005}.
 Para cada consulta, o IS-RAG (híbrido) e a linha de base recuperam
 independentemente os 10 trechos mais relevantes; a união
 ($\approx$14--18 trechos únicos por consulta) é anotada quanto à
-relevância (0--3) por um LLM (\texttt{claude-haiku-4-5}).
+relevância (0--3) por um LLM (\texttt{claude-opus-4-7}).
 Pontuações~$\geq 2$ exigem que o anotador cite uma palavra-âncora e
 o subtipo de esquema como evidência rastreável.
 Consultas com IDCG$=0$ (nenhum trecho com pontuação~$\geq 2$) são
-excluídas \citep{buckley2004}; esse critério provocou a exclusão de uma
-consulta (cf.\ \S\ref{sec:discussion}).
+excluídas \citep{buckley2004}.
 
 \paragraph{Projeto das Consultas.}
-Nove consultas válidas foram projetadas com três propriedades:
-(1)~cobertura taxonômica (3~\textsc{Force} $+$ 2~\textsc{Container}
+Dez consultas válidas foram projetadas com três propriedades:
+(1)~cobertura taxonômica (3~\textsc{Force} $+$ 3~\textsc{Container}
 $+$ 3~\textsc{Path} $+$ 1~cross-schema);
 (2)~lacuna lexical deliberada (as consultas usam linguagem metafórica
 assertiva, evitando o vocabulário literal esperado nos documentos);
@@ -394,11 +419,170 @@ do ranqueamento \citep{buckley2004}.
 \section{Resultados}
 \label{sec:results}
 
-\subsection{Resultados por Consulta}
+\subsection{Ablação por Modo de Recuperação}
+\label{sec:ablation}
 
-A Tabela~\ref{tab:perquery} reporta o NDCG@5 do IS-RAG e da linha de
-base nas 9~consultas válidas (modo híbrido).
-A Figura~\ref{fig:results} visualiza o $\Delta$ por consulta.
+A Tabela~\ref{tab:modes} compara os três modos de recuperação IS-RAG
+contra a linha de base.
+O modo texto é a única configuração que supera a linha de base;
+os modos cognitivo e híbrido degradam a recuperação.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Modo} & \textbf{IS-RAG} & \textbf{Base} & $\boldsymbol{\Delta}$ \\
+\midrule
+\textbf{Texto}   & \textbf{0,7793} & 0,6881 & \textbf{+0,091} \\
+Híbrido          & 0,5979          & 0,6881 & $-$0,090 \\
+Cognitivo        & 0,4958          & 0,6881 & $-$0,192 \\
+\midrule
+Linha de base    & —               & 0,6881 & — \\
+\bottomrule
+\end{tabular}
+\caption{NDCG@5 médio nas 10~consultas por modo de recuperação
+  (anotador Opus independente).
+  O modo texto é a configuração IS-RAG mais eficaz.}
+\label{tab:modes}
+\end{table}
+
+A Tabela~\ref{tab:modes_compare} detalha $\Delta$ NDCG@5 por consulta
+nos três modos, revelando quais consultas e famílias de esquema
+impulsionam os resultados agregados.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{clccc}
+\toprule
+\textbf{Q} & \textbf{Esquema / Domínio} & \textbf{$\Delta$ Texto} & \textbf{$\Delta$ Cog.} & \textbf{$\Delta$ Híb.} \\
+\midrule
+Q1  & \textsc{Cont.}/Inside / Saúde             & 0,000           & $-$0,396        & $-$0,362 \\
+Q2  & \textsc{Force}/Compulsion / Economia     & \textbf{+0,390} & +0,138          & +0,138 \\
+Q3  & \textsc{Force}/Counter\_F / Justiça      & \textbf{+0,221} & $-$0,504        & $-$0,277 \\
+Q4  & \textsc{Force}/Resistance / Política     & \textbf{+0,189} & +0,236          & +0,150 \\
+\midrule
+Q5  & \textsc{Cont.}/Intrusion / Justiça       & $-$0,096        & $-$0,221        & $-$0,191 \\
+Q6  & \textsc{Cont.}/Outside / Dir.\ Hum.      & +0,046          & $-$0,172        & +0,046 \\
+\midrule
+Q7  & \textsc{Path}/Trajectory / Economia      & +0,036          & $-$0,188        & $-$0,007 \\
+Q8  & \textsc{Path}/Source / Política          & \textbf{+0,111} & $-$0,555        & $-$0,424 \\
+Q9  & \textsc{Path}/Diversion / Política       & +0,109          & $-$0,225        & +0,120 \\
+\midrule
+Q10 & \textsc{Force+Path} / Rel.\ Int.          & $-$0,094        & $-$0,038        & $-$0,094 \\
+\midrule
+\multicolumn{2}{l}{\textbf{Média}} & \textbf{+0,091} & $-$0,192 & $-$0,090 \\
+\bottomrule
+\end{tabular}
+\caption{$\Delta$ NDCG@5 por consulta nos três modos IS-RAG
+  (anotador Opus independente, 10~consultas).
+  Q1 (\textsc{Container}/\textsc{Inside}) exibe $\Delta{=}0$ no modo
+  texto: o boost é inerte para o subtipo mais convencionalizado.
+  O modo texto é o mais consistentemente positivo.}
+\label{tab:modes_compare}
+\end{table}
+
+\paragraph{Por que o modo cognitivo falha.}
+No modo cognitivo, strings de esquema serializadas são os únicos
+vetores de busca.
+Com 171~trechos compartilhando esquemas sobrepostos
+(PATH~92$\times$, CONTAINER~88$\times$, FORCE~83$\times$), as
+similaridades de cosseno ficam comprimidas, produzindo um ranqueamento
+base ruidoso que o boosting não consegue corrigir
+($\Delta = -0{,}192$).
+
+\paragraph{Por que o modo híbrido falha.}
+O modo híbrido calcula a média de $s_t$ e $s_c$ antes do boosting.
+O componente ruidoso do embedding cognitivo contamina o sinal textual,
+rebaixando o ranqueamento base abaixo do que a recuperação textual pura
+alcança ($\Delta = -0{,}090$).
+
+\paragraph{Implicação arquitetural.}
+O valor do IS-RAG reside em um \emph{sinal proporcional de
+re-ranqueamento} derivado dos metadados de esquema ($\sigma$,~$\delta$),
+não na recuperação por embedding duplo.
+A coluna \texttt{cognitive\_embedding} é necessária para indexação
+(para calcular $\sigma$), mas contraproducente como vetor de busca.
+Manter \texttt{cognitive\_metadata} e usar apenas a similaridade textual
+como base captura o ganho integral do IS-RAG sem a degradação dos modos
+híbrido e cognitivo.
+
+\subsection{Validação de Robustez: Efeito de Eco do LLM}
+\label{sec:robustness}
+
+Para descartar o eco do LLM como fonte do ganho no modo texto,
+re-anotamos o pool de relevância com \texttt{claude-opus-4-7}, modelo
+independente do \texttt{claude-haiku-4-5} usado como Analisador Cognitivo
+na indexação.
+A Tabela~\ref{tab:annotator} reporta o NDCG@5 no modo texto sob ambos
+os anotadores.
+O $\Delta$ mantém-se dentro de um ponto percentual ($+0{,}091$
+vs.\ $+0{,}093$); o anotador independente também resolve uma consulta
+anteriormente inanotável (Q1 \textsc{Container}/\textsc{Inside},
+IDCG${=}0$ com Haiku), expandindo a avaliação para 10~consultas válidas.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Anotador} & \textbf{Relação com parser} & \textbf{Consultas} & \textbf{Base} & \textbf{IS-RAG} & \textbf{$\Delta$} \\
+\midrule
+\texttt{claude-haiku-4-5} & Mesmo modelo &  9 & 0,6947 & 0,7873 & \textbf{+0,093} \\
+\texttt{claude-opus-4-7}  & Independente & 10 & 0,6881 & 0,7793 & \textbf{+0,091} \\
+\bottomrule
+\end{tabular}
+\caption{NDCG@5 (modo texto) sob dois anotadores.
+  O ganho persiste ($\Delta \approx +0{,}09$) com avaliador
+  independente, descartando eco do LLM como explicação principal.}
+\label{tab:annotator}
+\end{table}
+
+\subsection{Fronteira de Utilidade do Embedding}
+\label{sec:embedding}
+
+Para testar se o ganho no modo texto sobrevive a um embedding base mais
+forte, re-indexamos o corpus com \texttt{BAAI/bge-m3} (1024d) e
+re-anotamos o pool com o mesmo anotador Opus independente.
+A Tabela~\ref{tab:embedding} compara o $\Delta$ IS-RAG nos três modos
+para ambos os modelos.
+O ganho no modo texto colapsa para $\Delta \approx 0$; a degradação dos
+modos híbrido e cognitivo permanece estável entre os modelos.
+Q4 (\textsc{Force}/\textsc{Resistance}) é o principal fator do colapso:
+sua baseline sobe de $0{,}489$ (mpnet) para $0{,}830$ (bge-m3),
+indicando que o modelo mais forte recupera os documentos corretos sem
+auxílio de esquemas.
+
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Embedding} & \textbf{$\Delta$ Texto} & \textbf{$\Delta$ Híb.} & \textbf{$\Delta$ Cog.} \\
+\midrule
+\texttt{mpnet-base-v2} (768d) & \textbf{+0,091} & $-$0,090 & $-$0,192 \\
+\texttt{bge-m3}        (1024d) & $\approx$0,001  & $-$0,068 & $-$0,202 \\
+\bottomrule
+\end{tabular}
+\caption{$\Delta$ NDCG@5 do IS-RAG por modo de recuperação sob dois
+  modelos de embedding base (10~consultas, anotador Opus independente).
+  O ganho no modo texto é dependente do embedding: \texttt{bge-m3}
+  fecha a lacuna léxico-cognitiva que o IS-RAG compensava com o
+  \texttt{mpnet-base-v2}.}
+\label{tab:embedding}
+\end{table}
+
+\subsection{Resultados por Consulta (Modo Texto)}
+
+A Tabela~\ref{tab:perquery} reporta o NDCG@5 do IS-RAG no modo
+texto — a configuração mais eficaz identificada pela ablação
+(\S\ref{sec:ablation}) — contra a linha de base, para todas as
+10~consultas válidas (anotador Opus independente).
 
 \begin{table}[H]
 \centering
@@ -408,61 +592,80 @@ A Figura~\ref{fig:results} visualiza o $\Delta$ por consulta.
 \toprule
 \textbf{Q} & \textbf{Esquema / Domínio} & \textbf{IS-RAG} & \textbf{Base} & $\boldsymbol{\Delta}$ \\
 \midrule
-Q2 & \textsc{Force}/Compulsion / Economia    & 0,8375 & 0,5308 & \textbf{+0,307} \\
-Q3 & \textsc{Force}/Counter\_F / Justiça     & 0,9093 & 0,6590 & \textbf{+0,250} \\
-Q4 & \textsc{Force}/Resistance / Política    & 0,6548 & 0,5818 & +0,073 \\
+Q1  & \textsc{Cont.}/Inside / Saúde            & 0,5221 & 0,5221 & 0,000 \\
+Q2  & \textsc{Force}/Compulsion / Economia     & 1,0000 & 0,6100 & \textbf{+0,390} \\
+Q3  & \textsc{Force}/Counter\_F / Justiça      & 0,9323 & 0,7116 & \textbf{+0,221} \\
+Q4  & \textsc{Force}/Resistance / Política     & 0,6787 & 0,4896 & \textbf{+0,189} \\
 \midrule
-Q5 & \textsc{Cont.}/Intrusion / Justiça      & 0,6403 & 0,9105 & $-$0,270 \\
-Q6 & \textsc{Cont.}/Outside / Dir.\ Hum.     & 0,7833 & 0,7226 & +0,061 \\
+Q5  & \textsc{Cont.}/Intrusion / Justiça       & 0,7791 & 0,8754 & $-$0,096 \\
+Q6  & \textsc{Cont.}/Outside / Dir.\ Hum.      & 0,6993 & 0,6534 & +0,046 \\
 \midrule
-Q7 & \textsc{Path}/Trajectory / Economia     & 0,6488 & 0,6488 & $\pm$0,000 \\
-Q8 & \textsc{Path}/Source / Política         & 0,5745 & 0,6972 & $-$0,123 \\
-Q9 & \textsc{Path}/Diversion / Política      & 0,7777 & 0,8527 & $-$0,075 \\
+Q7  & \textsc{Path}/Trajectory / Economia      & 0,8200 & 0,7840 & +0,036 \\
+Q8  & \textsc{Path}/Source / Política          & 0,7929 & 0,6819 & \textbf{+0,111} \\
+Q9  & \textsc{Path}/Diversion / Política       & 0,7467 & 0,6377 & +0,109 \\
 \midrule
-Q10 & \textsc{Force+Path} / Rel.\ Int.        & 0,5397 & 0,6488 & $-$0,109 \\
+Q10 & \textsc{Force+Path} / Rel.\ Int.          & 0,8215 & 0,9155 & $-$0,094 \\
 \midrule
-\multicolumn{2}{l}{\textbf{Média (9 consultas)}} & \textbf{0,7073} & \textbf{0,6947} & \textbf{+0,013} \\
+\multicolumn{2}{l}{\textbf{Média (10 consultas)}} & \textbf{0,7793} & \textbf{0,6881} & \textbf{+0,091} \\
 \bottomrule
 \end{tabular}
-\caption{NDCG@5 (IS-RAG vs.\ linha de base, modo híbrido). Consultas agrupadas por família de esquema.}
+\caption{NDCG@5 (IS-RAG modo texto vs.\ linha de base, anotador Opus
+  independente). Consultas agrupadas por família de esquema.
+  Q1 $\Delta{=}0$: boost inerte para \textsc{Container}/\textsc{Inside}
+  convencionalizado.}
 \label{tab:perquery}
 \end{table}
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=1\textwidth]{images/PT_Results_pt-br_.png}
-  \caption{$\Delta$ NDCG@5 por consulta (IS-RAG $-$ linha de base).}
-  \label{fig:results}
-\end{figure}
+%\begin{figure}[H]
+%  \centering
+%  \includegraphics[width=1\textwidth]{images/PT_Results_modo_texto.png}
+%  \caption{$\Delta$ NDCG@5 por consulta no modo texto.
+%    Resultados completos na Tabela~\ref{tab:perquery};
+%    comparação entre modos na Tabela~\ref{tab:modes}.}
+%  \label{fig:results}
+%\end{figure}
 
-\subsection{Análise por Esquema}
+\subsection{Análise por Família de Esquema}
 
-A Tabela~\ref{tab:schema} agrega os resultados por família de esquema.
-A média não ponderada ($\Delta{=}{+}0{,}013$) mascara forte
-heterogeneidade: \textsc{Force} concentra todos os ganhos, enquanto
-\textsc{Container} e \textsc{Path} são neutros ou negativos.
-A ponderação igualitária entre as quatro famílias de esquema produz
-$\Delta_\text{família}{=}{-}0{,}017$.
+A Tabela~\ref{tab:schema} agrega os resultados do modo texto por
+família de esquema (dados completos, 10~consultas).
 
 \begin{table}[H]
 \centering
 \small
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{lccp{3.8cm}}
+\begin{tabular}{lccp{4.2cm}}
 \toprule
 \textbf{Família} & \textbf{$n$} & \textbf{$\Delta$ médio} & \textbf{$\Delta$ individuais} \\
 \midrule
-\textsc{Force}     & 3 & \textbf{+0,210} & +0,307,\ +0,250,\ +0,073 \\
-\textsc{Container} & 2 & $-$0,105        & $-$0,270,\ +0,061 \\
-\textsc{Path}      & 3 & $-$0,066        & \ 0,000,\ $-$0,123,\ $-$0,075 \\
-Cross              & 1 & $-$0,109        & $-$0,109 \\
+\textsc{Force}     & 3 & \textbf{+0,267} & +0,390,\ +0,221,\ +0,189 \\
+\textsc{Path}      & 3 & +0,085          & +0,036,\ +0,111,\ +0,109 \\
+Cross              & 1 & $-$0,094        & $-$0,094 \\
+\textsc{Container} & 3 & $-$0,017        & 0,000,\ $-$0,096,\ +0,046 \\
 \midrule
-\multicolumn{2}{l}{Média ponderada por família} & $-$0,017 & \\
+\multicolumn{2}{l}{Média ponderada por família} & +0,060 & \\
 \bottomrule
 \end{tabular}
-\caption{$\Delta$ NDCG@5 por família de esquema (modo híbrido).}
+\caption{$\Delta$ NDCG@5 por família de esquema (modo texto,
+  anotador Opus independente, 10~consultas).
+  Famílias ordenadas por $\Delta$ médio. \textsc{Force} é o sinal
+  mais forte e consistente; \textsc{Path} é positivo em todas as
+  três consultas.}
 \label{tab:schema}
 \end{table}
+
+\textsc{Force} apresenta o sinal mais forte e consistente
+($\Delta = +0{,}267$; todas as três consultas positivas).
+\textsc{Path} é positivo em todas as três consultas ($+0{,}085$):
+Q8~($+0{,}111$) e Q9~($+0{,}109$) são os maiores ganhos;
+Q7~($+0{,}036$) contribui positivamente.
+\textsc{Container} apresenta efeito médio próximo de zero ($-0{,}017$),
+muito menos severo que nos modos cognitivo e híbrido
+(Tabela~\ref{tab:modes_compare}).
+Q1, agora avaliável com o anotador Opus, exibe $\Delta{=}0$:
+o boost é inerte para o subtipo mais convencionalizado.
+A média ponderada por família ($+0{,}060$) confirma que o modo texto
+produz resultados positivos na maioria das famílias de esquema.
 
 % =================================================================
 \section{Discussão}
@@ -470,8 +673,8 @@ Cross              & 1 & $-$0,109        & $-$0,109 \\
 
 \paragraph{Force é o maior beneficiário do boosting cognitivo.}
 Todas as três consultas \textsc{Force} apresentam $\Delta$ positivo,
-com \textsc{Compulsion} ($+$0,307) e \textsc{Counter\_Force}
-($+$0,250) como os resultados mais expressivos.
+com \textsc{Compulsion} ($+$0,390) e \textsc{Counter\_Force}
+($+$0,221) como os resultados mais expressivos.
 Esquemas \textsc{Force} tendem a empregar vocabulário metafórico
 saliente e não convencionalizado no discurso parlamentar
 (\emph{pressiona, bloqueia, choca}), tornando a detecção e o boosting
@@ -479,12 +682,23 @@ eficazes.
 Esse padrão é específico do corpus e não deve ser generalizado sem
 validação adicional.
 
-\paragraph{Path e Container não se beneficiam.}
-As metáforas \textsc{Path} aparecem tão convencionalizadas no registro
-parlamentar que não discriminam trechos relevantes dos não relevantes.
-\textsc{Container}/\textsc{Intrusion} (Q5) foi projetada para o modo
-\emph{cognitivo}; a execução forçada em modo híbrido explica parte da
-degradação ($\Delta = -0{,}270$).
+\paragraph{Path é positivo em todas as consultas no modo texto; Container exibe efeito médio próximo de zero.}
+No modo híbrido, a consulta \textsc{Path} Q8 degrada severamente
+($-0{,}424$), enquanto Q9 é positiva ($+0{,}120$) e Q7 é neutra
+($-0{,}007$) (Tabela~\ref{tab:modes_compare}).
+No modo texto, todas as três consultas são positivas:
+Q8~($+0{,}111$), Q9~($+0{,}109$) e Q7~($+0{,}036$);
+a média da família é $+0{,}085$ (Tabela~\ref{tab:schema}).
+O déficit pontual de \textsc{Path} no modo híbrido (Q8) é, portanto,
+artefato do ruído do embedding cognitivo contaminando a similaridade
+base, não uma propriedade intrínseca das metáforas de trajetória.
+\textsc{Container} apresenta efeito médio próximo de zero no modo texto
+($0{,}000$, $-0{,}096$, $+0{,}046$; média da família $-0{,}017$),
+substancialmente menos severo do que no modo híbrido ($-0{,}169$) ou
+cognitivo ($-0{,}263$).
+\textsc{Container}/\textsc{Intrusion} (Q5) apresenta déficit leve no
+modo texto ($-0{,}096$) versus déficit moderado no modo híbrido
+($-0{,}191$), ilustrando o padrão geral.
 
 \paragraph{A formulação assertiva das consultas é obrigatória.}
 O Analisador Cognitivo aplica uma regra de literalidade: consultas
@@ -496,33 +710,71 @@ assertivas} para ativar o componente cognitivo.
 Esta é uma restrição operacional vinculante para qualquer implantação
 do IS-RAG.
 
-\paragraph{Frequência de esquema $\neq$ anotabilidade.}
+\paragraph{Frequência de esquema $\neq$ boostabilidade.}
 Q1 foi projetada como \textsc{Container}/\textsc{Inside}, o subtipo
 mais frequente no corpus (80~ocorrências).
-Apesar da alta frequência, o anotador consistentemente atribuiu
-pontuação~1 aos trechos \textsc{Inside} (domínio presente, esquema
-não-saliente) em vez de $\geq 2$ (instanciação metafórica clara).
+Com o anotador Haiku, Q1 era excluída (IDCG${=}0$): o modelo atribuía
+pontuação~1 a todos os trechos \textsc{Inside} (domínio presente,
+esquema não-saliente).
+Com o anotador Opus independente, Q1 passa a ter IDCG${>}0$ —
+documentos relevantes são identificáveis —, mas o boost IS-RAG
+produz $\Delta{=}0$: o esquema é presente mas não discriminativo.
 A contenção espacial está tão convencionalizada no discurso parlamentar
-que não constitui um sinal discriminativo de relevância.
-Q1 foi excluída (IDCG${=}0$), resultando na distribuição final
-3-2-3-1 de consultas.
+que não carrega sinal discriminativo de re-ranking, independentemente
+do modelo de julgamento de relevância.
+A distribuição final é 3-3-3-1 (10~consultas).
+
+\paragraph{IS-RAG como camada compensatória para limitações de embedding.}
+O experimento de embedding (\S\ref{sec:embedding}) posiciona o IS-RAG
+dentro de uma tensão arquitetural mais ampla: a lacuna léxico-cognitiva
+que o boost de esquemas preenche é justamente aquela que modelos densos
+SOTA fecham \emph{implicitamente} por meio de pré-treinamento mais
+profundo em corpora multilíngues diversos.
+Isso torna o IS-RAG particularmente valioso em cenários de implantação
+onde embeddings de grande escala são impraticáveis --- ambientes com
+restrição de recursos computacionais, recuperação em dispositivo, ou
+contextos regulatórios que exigem modelos hospedados localmente ---
+onde o boosting explícito por esquemas recupera parte substancial do
+alinhamento semântico que embeddings mais fortes forneceriam nativamente.
+À medida que a tecnologia de embedding avança, o valor marginal do
+IS-RAG no modo texto tende a diminuir ainda mais, motivando trabalhos
+futuros em recuperação ciente de esquemas robusta a embeddings fortes:
+ajuste fino específico ao domínio do Analisador Cognitivo,
+re-ranqueadores condicionados a esquemas, ou restrições rígidas de
+esquema em vez de boosts proporcionais suaves.
+Crucialmente, a degradação dos modos híbrido e cognitivo permanece
+estável independentemente da qualidade do embedding (\S\ref{sec:embedding}),
+confirmando que a falha da recuperação por embedding duplo é estrutural,
+não dependente do modelo.
 
 \paragraph{Limitações.}
 (1)~O corpus é pequeno e homogêneo (171~trechos, único registro,
 somente português); os resultados carecem de testes de significância
 estatística.
-(2)~\emph{Circularidade com LLM}: o mesmo modelo anota, analisa e
-aplica boosting — criando risco de que o anotador favoreça trechos
-que o analisador indexou com os mesmos esquemas da consulta.
-Uma auditoria humana cega sobre 20\% da amostra do pool anotado será
-realizada em trabalhos futuros para calcular o índice de concordância
-Kappa de Fleiss entre juízes humanos independentes e o anotador LLM.
+(2)~\emph{Circularidade com LLM}: o Analisador Cognitivo e o parser
+de consulta usam \texttt{claude-haiku-4-5}; o anotador de relevância
+usa \texttt{claude-opus-4-7} (configurável via \texttt{ANNOTATOR\_MODEL}).
+Essa separação deliberada de modelos rompe o loop de eco mais crítico:
+o avaliador não é mais o mesmo modelo que indexou os esquemas dos
+documentos.
+Risco residual permanece (ambos são modelos Anthropic/Claude), e uma
+auditoria humana cega sobre 20\% do pool será conduzida em trabalhos
+futuros para calcular o Kappa de Fleiss.
 (3)~Confundimento por domínio: as consultas \textsc{Force} se
 concentram em Economia e Justiça; se o esquema co-ocorre com esses
 domínios no corpus, os ganhos podem refletir afinidade de domínio em
 vez de estrutura puramente cognitiva.
 (4)~Os pesos de boosting ($\alpha{=}0{,}4$, $\beta{=}0{,}3$) são
 escolhas de projeto, não otimizadas.
+(5)~\emph{Não-determinismo na avaliação}: o Analisador Cognitivo
+introduz variância entre execuções nos scores do IS-RAG.
+Uma segunda execução independente produz IS-RAG\,=\,0{,}7716
+($\Delta=+0{,}077$, modo texto); a baseline (0{,}6947) é determinística
+e estável entre execuções.
+A direção positiva de $\Delta$ é consistente entre ambas as execuções;
+a magnitude exata não é.
+Execuções múltiplas com reporte de média\,$\pm$\,desvio padrão são
+deixadas para trabalhos futuros.
 
 % =================================================================
 \section{Conclusão}
@@ -533,20 +785,37 @@ uma nova linha de pesquisa na interseção entre linguística cognitiva e
 recuperação de informação.
 A contribuição central não é uma afirmação de superioridade universal,
 mas a demonstração de que metadados de esquemas imagéticos podem ser
-codificados, detectados e aproveitados dentro de um pipeline de
-recuperação densa padrão — produzindo ganhos mensuráveis de NDCG@5
-para consultas \textsc{Force} em modo híbrido
-($\Delta_\text{FORCE} = +0{,}210$) em um corpus parlamentar brasileiro
-real.
+codificados, detectados e aproveitados como sinal proporcional de
+re-ranqueamento dentro de um pipeline de recuperação densa padrão —
+produzindo ganho médio de NDCG@5 de $+0{,}091$ no modo texto
+(10~consultas, corpus parlamentar brasileiro real).
+Uma ablação por modos de recuperação (\S\ref{sec:ablation}) localiza
+a contribuição do IS-RAG com precisão: o boost multiplicativo aplicado
+sobre a similaridade textual é eficaz
+($\Delta_\text{texto} = +0{,}091$), enquanto embeddings cognitivos
+usados como vetores de busca degradam o desempenho
+($\Delta_\text{híbrido} = -0{,}090$;
+$\Delta_\text{cognitivo} = -0{,}192$).
+Crucialmente, o ganho no modo texto persiste com anotador independente
+(\texttt{claude-opus-4-7} vs.\ \texttt{claude-haiku-4-5}),
+descartando eco do LLM como explicação principal
+(Tabela~\ref{tab:annotator}).
+Um experimento subsequente com \texttt{BAAI/bge-m3}
+(\S\ref{sec:embedding}) revela que o ganho é dependente do embedding:
+com um modelo multilíngue de última geração, o $\Delta$ no modo texto
+colapsa para $\approx 0$, definindo uma fronteira de utilidade para o
+boosting cognitivo explícito.
 
-Os resultados assimétricos entre as famílias de esquema são em si um
-achado: revelam que a frequência de um esquema no corpus não prediz sua
-anotabilidade, e que a relação entre estrutura cognitiva e relevância
-de recuperação é não-trivial e merece investigação sistemática.
+Os resultados assimétricos entre famílias de esquema e modos são em si
+achados: revelam que a frequência de um esquema não prediz sua
+boostabilidade, que os déficits de \textsc{Path} no modo híbrido são
+artefatos de embeddings cognitivos ruidosos — não propriedades do
+esquema —, e que a recuperação dual não é necessária para o IS-RAG
+funcionar.
 O IS-RAG estabelece a prova de conceito e o arcabouço metodológico —
-embeddings duais, boosting cognitivo, avaliação estratificada por
-esquema estilo TREC — sobre os quais trabalhos futuros em
-\emph{RI cognitiva} poderão se construir.
+indexação de metadados cognitivos, boosting proporcional, avaliação
+estratificada por esquema estilo TREC — sobre os quais trabalhos futuros
+em \emph{RI cognitiva} poderão se construir.
 
 Os próximos passos imediatos incluem um design de avaliação cruzada
 esquema$\times$domínio, investigação de esquemas convencionalizados
@@ -569,87 +838,8 @@ disponíveis em \url{https://github.com/yanjustino/is-rag}.
 \setcounter{section}{0}
 \renewcommand{\thesection}{\Alph{section}}
 
-\pagebreak
-\section{Prompt de Análise Cognitiva}
-\label{app:prompt}
-
-O prompt a seguir é compartilhado entre o pipeline de indexação
-(\texttt{ingestion.py}) e a etapa de análise de consultas
-(\texttt{search.py}).
-Está escrito em \textbf{português} para corresponder ao idioma do
-corpus e preservar a precisão terminológica nos exemplos \emph{few-shot}.
-O marcador \texttt{\{text\}} é substituído em tempo de execução pelo
-texto do trecho ou da consulta.
-
-\begin{lstlisting}
-Você é um linguista cognitivo especialista na Teoria da
-Metáfora Conceptual de Lakoff e nas Dinâmicas de Força de
-Talmy. Sua missão é analisar um texto em português extraído
-de discursos parlamentares, identificar os Esquemas
-Imagéticos dominantes e mapear como eles estruturam
-conceitos abstratos.
-
-Analise o texto seguindo rigorosamente esta taxonomia:
-
-1. MACROESQUEMAS E SUBTIPOS VÁLIDOS:
-- CONTAINER:
-  * INSIDE    (Estar contido, protegido, preso, engessado)
-  * OUTSIDE   (Estar fora, excluído, marginalizado)
-  * BOUNDARY  (Fronteiras, limites, barreiras de contenção)
-  * INTRUSION (Invasão, penetração forçada no recipiente)
-- PATH:
-  * SOURCE     (Ponto de partida, origem, base histórica)
-  * TRAJECTORY (Movimento, progresso, passos, rumo)
-  * GOAL       (Destino, objetivo final, chegada)
-  * DIVERSION  (Desvio de rota, perda de foco, sabotagem)
-- FORCE:
-  * BLOCKAGE     (Bloqueio completo, barreira física/legal)
-  * COMPULSION   (Força externa que empurra, obriga, coage)
-  * RESISTANCE   (Resistência interna, oposição ativa)
-  * COUNTER_FORCE(Duas forças colidindo, embate direto)
-
-2. REGRAS PARA target_domain_pt (lista fechada):
-"Economia" | "Política" | "Infraestrutura e Transportes"
-| "Segurança Pública" | "Justiça" | "Direitos Humanos e
-Cultura" | "Educação" | "Saúde" | "Meio Ambiente"
-| "Relações Internacionais" | "Outros"
-
-3. REGRA DE LITERALIDADE:
-Se o texto for puramente literal, descritivo, técnico ou
-administrativo, retorne listas vazias.
-
-EXEMPLOS (FEW-SHOT):
-
-Texto: "A oposição barrou os avanços da reforma tributária."
-Output:
-{"schemas": ["FORCE","PATH"], "details": [
-  {"schema_name":"FORCE","sub_type":"BLOCKAGE",
-   "anchor_word_pt":"barrou",
-   "target_domain_pt":"Política"},
-  {"schema_name":"PATH","sub_type":"TRAJECTORY",
-   "anchor_word_pt":"avanços",
-   "target_domain_pt":"Economia"}
-]}
-
-Texto: "A inflação empurrou as famílias para a crise."
-Output:
-{"schemas": ["FORCE"], "details": [
-  {"schema_name":"FORCE","sub_type":"COMPULSION",
-   "anchor_word_pt":"empurrou",
-   "target_domain_pt":"Economia"}
-]}
-
-Texto: "Quero saudar a presença do Vereador Júnior."
-Output: {"schemas": [], "details": []}
-
----
-Analise o texto a seguir e retorne o JSON estrito.
-
-Texto para análise:
-{text}
-\end{lstlisting}
-
 % =================================================================
+\pagebreak
 \section{Algoritmos IS-RAG}
 \label{app:algorithms}
 
@@ -665,7 +855,7 @@ Texto para análise:
   \State $C \gets \textsc{SemanticChunk}(d,\,w)$
   \Comment{divisão em fronteiras de sentença}
   \State $\mathbf{E}_t \gets [\,\mathcal{E}(c) \mid c \in C\,]$
-  \Comment{embeddings textuais, 768d}
+  \Comment{embeddings textuais, $d$-dimensional (modelo configurável)}
   \State $M \gets [\,\mathcal{P}(c) \mid c \in C\,]$
   \Comment{chamadas LLM concorrentes, 5 workers}
   \For{$i \gets 1$ \textbf{até} $|C|$}
@@ -702,8 +892,13 @@ Texto para análise:
                        \;/\; \max(n,1)$
   \State $\delta \gets |\{d \in M_i.\text{details} \mid d.\text{domain} \in \Delta_q\}|
                        \;/\; \max(n,1)$
-  \State $\hat{s}_i \gets s \cdot (1 + \alpha\,\sigma + \beta\,\delta)$
-  \Comment{Eq.~\ref{eq:boosting}}
+  \If{$M_i.\text{schemas} \cap \Sigma_q \neq \emptyset$}
+    \State $\hat{s}_i \gets s \cdot (1 + \alpha\,\sigma + \beta\,\delta)$
+    \Comment{Eq.~\ref{eq:boosting}}
+  \Else
+    \State $\hat{s}_i \gets s$
+    \Comment{sem correspondência de esquema — sem boost}
+  \EndIf
 \EndFor
 \State \Return $\textsc{TopK}(\{\hat{s}_i\},\,k)$
 \end{algorithmic}

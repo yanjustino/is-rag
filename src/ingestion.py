@@ -25,10 +25,11 @@ try:
 except ImportError:
     pass
 
-DB_TABLE = os.getenv("IS_RAG_TABLE", "document_chunks")
+DB_TABLE        = os.getenv("IS_RAG_TABLE",     "document_chunks")
+_EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
-print("[*] Carregando modelo de embeddings...")
-_embedding_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+print(f"[*] Carregando modelo de embeddings: {_EMBEDDING_MODEL}...")
+_embedding_model = SentenceTransformer(_EMBEDDING_MODEL)
 print("[√] Modelo de embeddings carregado.")
 
 
@@ -134,7 +135,7 @@ def extract_cognitive_metadata_concurrent(texts: List[str]) -> List[dict]:
 
 
 def get_embedding(text: str) -> List[float]:
-    """Gera embedding vetorial 768d usando sentence-transformers (local)."""
+    """Gera embedding vetorial usando sentence-transformers (local)."""
     try:
         return _embedding_model.encode(text, convert_to_numpy=True).tolist()
     except Exception as e:

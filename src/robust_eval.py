@@ -34,7 +34,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from src.eval_real import (
+from eval_real import (
     DEFAULT_GT,
     DEFAULT_TABLE,
     compute_ndcg,

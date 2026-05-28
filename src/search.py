@@ -21,10 +21,11 @@ try:
 except ImportError:
     pass
 
-DB_TABLE = os.getenv("IS_RAG_TABLE", "document_chunks")
+DB_TABLE         = os.getenv("IS_RAG_TABLE",     "document_chunks")
+_EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
-print("[*] Carregando modelo de embeddings...", file=sys.stderr)
-_embedding_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+print(f"[*] Carregando modelo de embeddings: {_EMBEDDING_MODEL}...", file=sys.stderr)
+_embedding_model = SentenceTransformer(_EMBEDDING_MODEL)
 print("[√] Modelo de embeddings carregado.", file=sys.stderr)
 
 # 1. Definição das Estruturas Pydantic
@@ -49,7 +50,7 @@ _anthropic_client = anthropic.Anthropic()
 def analyze_query(query_text: str) -> dict:
     """Detecta esquemas e sub_types da query via Anthropic API."""
     prompt = _QUERY_PROMPT_TEMPLATE.replace("{text}", query_text)
-    empty = {"schemas": [], "sub_types": [], "domains": []}
+    empty = {"schemas": [], "sub_types": [], "domains": [], "details": []}
     try:
         msg = _anthropic_client.messages.create(
             model=_COGNITIVE_MODEL,
@@ -65,6 +66,7 @@ def analyze_query(query_text: str) -> dict:
                 "schemas":   analysis.schemas,
                 "sub_types": [d.sub_type for d in analysis.details],
                 "domains":   list({d.target_domain_pt for d in analysis.details}),
+                "details":   [d.model_dump() for d in analysis.details],
             }
         else:
             print(f"[X] JSON não encontrado na resposta: {output[:200]}", file=sys.stderr)
@@ -74,18 +76,22 @@ def analyze_query(query_text: str) -> dict:
         return empty
 
 def get_embedding(text: str) -> List[float]:
-    """Gera embedding vetorial 768d para a query usando sentence-transformers (local)."""
+    """Gera embedding vetorial para a query usando sentence-transformers (local)."""
     try:
         return _embedding_model.encode(text, convert_to_numpy=True).tolist()
     except Exception as e:
         print(f"[X] Erro ao gerar embedding: {e}", file=sys.stderr)
         return []
 
-def cognitive_text_from_query(schemas: List[str], sub_types: List[str], query_text: str) -> str:
-    """Cria representação cognitiva da query para busca no cognitive_embedding."""
-    parts = [f"{s}: {query_text}" for s in schemas]
-    parts += [f"{st}: {query_text}" for st in sub_types]
-    return " | ".join(parts) if parts else query_text
+def cognitive_text_from_query(details: list) -> str:
+    """Serializa detalhes cognitivos da query no mesmo formato usado na ingestão:
+    'SCHEMA: anchor_word → domain | SCHEMA: anchor_word → domain'
+    """
+    parts = [
+        f"{d['schema_name']}: {d['anchor_word_pt']} → {d['target_domain_pt']}"
+        for d in details
+    ]
+    return " | ".join(parts) if parts else "sem esquema imagético"
 
 
 def normalize_results(rows) -> list[dict]:
@@ -139,6 +145,7 @@ def metaphorical_search(
     mode: str = "texto",
     verbose: bool = True,
     baseline: bool = False,
+    precomputed_analysis: dict = None,
 ) -> dict:
     """
     Modos:
@@ -152,8 +159,19 @@ def metaphorical_search(
         detected_schemas   = []
         detected_sub_types = []
         detected_domains   = []
+        detected_details   = []
         if verbose:
             print(f"[*] Busca baseline (vetorial pura, sem análise cognitiva): '{query_text}'")
+    elif precomputed_analysis is not None:
+        detected_schemas   = precomputed_analysis["schemas"]
+        detected_sub_types = precomputed_analysis["sub_types"]
+        detected_domains   = precomputed_analysis["domains"]
+        detected_details   = precomputed_analysis["details"]
+        if verbose:
+            print(f"[*] Usando análise cognitiva pré-computada: '{query_text}'")
+            print(f"    [+] Esquemas detectados  : {detected_schemas}")
+            print(f"    [+] Sub-tipos detectados : {detected_sub_types}")
+            print(f"    [+] Domínios detectados  : {detected_domains}")
     else:
         if verbose:
             print(f"[*] Analisando estrutura cognitiva da busca: '{query_text}'")
@@ -161,6 +179,7 @@ def metaphorical_search(
         detected_schemas   = query_analysis["schemas"]
         detected_sub_types = query_analysis["sub_types"]
         detected_domains   = query_analysis["domains"]
+        detected_details   = query_analysis["details"]
         if verbose:
             print(f"    [+] Esquemas detectados  : {detected_schemas}")
             print(f"    [+] Sub-tipos detectados : {detected_sub_types}")
@@ -183,7 +202,7 @@ def metaphorical_search(
             "error": error,
         }
 
-    cog_query_text = cognitive_text_from_query(detected_schemas, detected_sub_types, query_text)
+    cog_query_text = cognitive_text_from_query(detected_details)
     cog_query_embedding = get_embedding(cog_query_text)
 
     try:
@@ -192,6 +211,7 @@ def metaphorical_search(
                 if not detected_schemas:
                     if verbose:
                         print("[*] Nenhum esquema cognitivo detectado. Busca vetorial tradicional...")
+                    _threshold = 0.2 if mode in ("cognitivo", "hibrido") else 0.3
                     query_sql = sql.SQL(
                         """
                     SELECT
@@ -199,11 +219,11 @@ def metaphorical_search(
                         (1 - (embedding <=> %s::vector)) AS vector_similarity,
                         (1 - (embedding <=> %s::vector)) AS final_score
                     FROM {}
-                    WHERE (1 - (embedding <=> %s::vector)) > 0.3
+                    WHERE (1 - (embedding <=> %s::vector)) > {}
                     ORDER BY final_score DESC
                     LIMIT %s;
                     """
-                    ).format(sql.Identifier(DB_TABLE))
+                    ).format(sql.Identifier(DB_TABLE), sql.Literal(_threshold))
                     cur.execute(query_sql, (query_embedding, query_embedding, query_embedding, top_k))
                 else:
                     if mode == "cognitivo":
@@ -223,7 +243,8 @@ def metaphorical_search(
                                 (SELECT COUNT(*) FROM jsonb_array_elements_text(cognitive_metadata->'schemas') s
                                  WHERE s = ANY(%s::text[])) AS matched_schemas,
                                 (SELECT COUNT(*) FROM jsonb_array_elements(cognitive_metadata->'details') d
-                                 WHERE d->>'sub_type' = ANY(%s::text[])) AS matched_subtypes,
+                                 WHERE d->>'sub_type' = ANY(%s::text[]))::float
+                                 / NULLIF(jsonb_array_length(cognitive_metadata->'details'), 0) AS subtype_proportion,
                                 (SELECT COUNT(*) FROM jsonb_array_elements(cognitive_metadata->'details') d
                                  WHERE d->>'schema_name' = ANY(%s::text[]))::float
                                  / NULLIF(jsonb_array_length(cognitive_metadata->'details'), 0) AS schema_proportion,
@@ -268,7 +289,8 @@ def metaphorical_search(
                                 (SELECT COUNT(*) FROM jsonb_array_elements_text(cognitive_metadata->'schemas') s
                                  WHERE s = ANY(%s::text[])) AS matched_schemas,
                                 (SELECT COUNT(*) FROM jsonb_array_elements(cognitive_metadata->'details') d
-                                 WHERE d->>'sub_type' = ANY(%s::text[])) AS matched_subtypes,
+                                 WHERE d->>'sub_type' = ANY(%s::text[]))::float
+                                 / NULLIF(jsonb_array_length(cognitive_metadata->'details'), 0) AS subtype_proportion,
                                 (SELECT COUNT(*) FROM jsonb_array_elements(cognitive_metadata->'details') d
                                  WHERE d->>'schema_name' = ANY(%s::text[]))::float
                                  / NULLIF(jsonb_array_length(cognitive_metadata->'details'), 0) AS schema_proportion,
@@ -310,7 +332,8 @@ def metaphorical_search(
                                 (SELECT COUNT(*) FROM jsonb_array_elements_text(cognitive_metadata->'schemas') s
                                  WHERE s = ANY(%s::text[])) AS matched_schemas,
                                 (SELECT COUNT(*) FROM jsonb_array_elements(cognitive_metadata->'details') d
-                                 WHERE d->>'sub_type' = ANY(%s::text[])) AS matched_subtypes,
+                                 WHERE d->>'sub_type' = ANY(%s::text[]))::float
+                                 / NULLIF(jsonb_array_length(cognitive_metadata->'details'), 0) AS subtype_proportion,
                                 (SELECT COUNT(*) FROM jsonb_array_elements(cognitive_metadata->'details') d
                                  WHERE d->>'schema_name' = ANY(%s::text[]))::float
                                  / NULLIF(jsonb_array_length(cognitive_metadata->'details'), 0) AS schema_proportion,
@@ -342,6 +365,7 @@ def metaphorical_search(
                     "detected_schemas": detected_schemas,
                     "detected_sub_types": detected_sub_types,
                     "detected_domains": detected_domains,
+                    "detected_details": detected_details,
                     "results": normalize_results(results),
                 }
                 if verbose:
@@ -371,18 +395,21 @@ if __name__ == "__main__":
     query = args[0]
     k    = 5
     mode = "texto"
-    json_output = "--json" in args
-    baseline    = "--baseline" in args
+    json_output         = "--json" in args
+    baseline            = "--baseline" in args
+    precomputed_analysis = None
 
     try:
         if "--top" in args:
             k = int(args[args.index("--top") + 1])
         if "--mode" in args:
             mode = args[args.index("--mode") + 1]
-    except (IndexError, ValueError):
-        print("Uso: python search.py \"query\" [--top N] [--mode texto|cognitivo|hibrido] [--baseline] [--json]")
+        if "--precomputed-analysis" in args:
+            precomputed_analysis = json.loads(args[args.index("--precomputed-analysis") + 1])
+    except (IndexError, ValueError) as e:
+        print(f"Uso: python search.py \"query\" [--top N] [--mode texto|cognitivo|hibrido] [--baseline] [--precomputed-analysis JSON] [--json]: {e}")
         sys.exit(1)
 
-    report = metaphorical_search(query, top_k=k, mode=mode, verbose=not json_output, baseline=baseline)
+    report = metaphorical_search(query, top_k=k, mode=mode, verbose=not json_output, baseline=baseline, precomputed_analysis=precomputed_analysis)
     if json_output:
         print(json.dumps(report, ensure_ascii=False, indent=2))
